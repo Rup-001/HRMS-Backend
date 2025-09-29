@@ -1,5 +1,5 @@
 const moment = require('moment-timezone');
-const Employee = require('../models/Employee');
+const Employee = require('../models/employee');
 const EmployeesAttendance = require('../models/EmployeesAttendance');
 const LeaveRequest = require('../models/leaveRequest');
 const Holiday = require('../models/holiday');

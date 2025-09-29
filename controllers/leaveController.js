@@ -73,7 +73,7 @@
 
 const LeaveRequest = require('../models/leaveRequest');
 const EmployeesAttendance = require('../models/EmployeesAttendance');
-const Employee = require('../models/Employee');
+const Employee = require('../models/employee');
 const moment = require('moment-timezone');
 
 exports.createLeaveRequest = async (req, res) => {
