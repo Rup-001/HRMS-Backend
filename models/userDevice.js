@@ -1,0 +1,12 @@
+const mongoose = require('mongoose');
+
+const userDeviceSchema = new mongoose.Schema({
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+  userId: { type: String, required: true },
+  name: { type: String },
+  role: { type: String },
+  password: { type: String },
+  cardNo: { type: String }
+}, { timestamps: true, indexes: [{ key: { companyId: 1, userId: 1 }, unique: true }] });
+
+module.exports = mongoose.model('UserDevice', userDeviceSchema);
