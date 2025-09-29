@@ -46,4 +46,5 @@ const employeeSchema = new mongoose.Schema({
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null }  // New field for hierarchy
 }, { timestamps: true });
 
-module.exports = mongoose.model('Employee', employeeSchema);
+// module.exports = mongoose.model('Employee', employeeSchema);
+module.exports = mongoose.models.Employee || mongoose.model("Employee", employeeSchema);
