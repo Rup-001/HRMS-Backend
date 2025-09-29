@@ -1,4 +1,4 @@
-const Employee = require('../models/Employee');
+const Employee = require('../models/employee');
 const User = require('../models/user');
 const Invitation = require('../models/invitation');
 const nodemailer = require('nodemailer');
