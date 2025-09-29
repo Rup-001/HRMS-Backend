@@ -8,4 +8,5 @@ const logSchema = new mongoose.Schema({
   ip: { type: String, default: '' }
 }, { timestamps: true, indexes: [{ key: { user_id: 1, timestamp: 1 }, unique: true }] });
 
-module.exports = mongoose.model('Log', logSchema);
+// module.exports = mongoose.model('Log', logSchema);
+module.exports = mongoose.models.Log || mongoose.model('Log', logSchema);

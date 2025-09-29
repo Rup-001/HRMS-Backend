@@ -9,4 +9,5 @@ const userDeviceSchema = new mongoose.Schema({
   cardNo: { type: String }
 }, { timestamps: true, indexes: [{ key: { companyId: 1, userId: 1 }, unique: true }] });
 
-module.exports = mongoose.model('UserDevice', userDeviceSchema);
+// module.exports = mongoose.model('UserDevice', userDeviceSchema);
+module.exports = mongoose.models.UserDevice || mongoose.model('UserDevice', userDeviceSchema);

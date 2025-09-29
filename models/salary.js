@@ -10,4 +10,5 @@ const salarySchema = new mongoose.Schema({
   endDate: { type: Date }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Salary', salarySchema);
+// module.exports = mongoose.model('Salary', salarySchema);
+module.exports = mongoose.models.Salary || mongoose.model('Salary', salarySchema);

@@ -5,4 +5,5 @@ const lastSyncSchema = new mongoose.Schema({
   lastSyncTimestamp: { type: Date, required: true }
 }, { timestamps: true });
 
-module.exports = mongoose.model('LastSync', lastSyncSchema);
+// module.exports = mongoose.model('LastSync', lastSyncSchema);
+module.exports = mongoose.models.LastSync || mongoose.model('LastSync', lastSyncSchema);

@@ -7,4 +7,5 @@ const holidaySchema = new mongoose.Schema({
   isNational: { type: Boolean, default: false }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Holiday', holidaySchema);
+// module.exports = mongoose.model('Holiday', holidaySchema);
+module.exports = mongoose.models.Holiday || mongoose.model('Holiday', holidaySchema);

@@ -10,4 +10,5 @@ const invitationSchema = new mongoose.Schema({
   accepted: { type: Boolean, default: false }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Invitation', invitationSchema);
+// module.exports = mongoose.model('Invitation', invitationSchema);
+module.exports = mongoose.models.Invitation || mongoose.model('Invitation', invitationSchema);

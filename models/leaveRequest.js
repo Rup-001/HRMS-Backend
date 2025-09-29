@@ -11,4 +11,5 @@ const leaveRequestSchema = new mongoose.Schema({
   isHalfDay: { type: Boolean, default: false }
 }, { timestamps: true });
 
-module.exports = mongoose.model('LeaveRequest', leaveRequestSchema);
+// module.exports = mongoose.model('LeaveRequest', leaveRequestSchema);
+module.exports = mongoose.models.LeaveRequest || mongoose.model('LeaveRequest', leaveRequestSchema);

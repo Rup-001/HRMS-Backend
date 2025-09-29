@@ -11,4 +11,7 @@ const employeesAttendanceSchema = new mongoose.Schema({
   leave_type: { type: String, enum: ['sick', 'casual', 'annual', 'maternity', 'paternity', 'bereavement', null] }
 }, { timestamps: true, indexes: [{ key: { employeeId: 1, date: 1 }, unique: true }] });
 
-module.exports = mongoose.model('EmployeesAttendance', employeesAttendanceSchema);
+// module.exports = mongoose.model('EmployeesAttendance', employeesAttendanceSchema);
+module.exports =
+  mongoose.models.EmployeesAttendance ||
+  mongoose.model("EmployeesAttendance", employeesAttendanceSchema);

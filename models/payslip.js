@@ -17,4 +17,5 @@ const payslipSchema = new mongoose.Schema({
   paidDate: { type: Date }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Payslip', payslipSchema);
+// module.exports = mongoose.model('Payslip', payslipSchema);
+module.exports = mongoose.models.Payslip || mongoose.model('Payslip', payslipSchema);
