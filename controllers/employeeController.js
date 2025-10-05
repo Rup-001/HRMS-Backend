@@ -70,12 +70,47 @@ exports.createEmployee = async (req, res) => {
   }
 };
 
+// exports.updateEmployee = async (req, res) => {
+//   try {
+//     const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+//     if (!employee) {
+//       return res.status(404).json({ success: false, error: 'Employee not found' });
+//     }
+//     res.status(200).json({ success: true, data: employee });
+//   } catch (error) {
+//     res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
 exports.updateEmployee = async (req, res) => {
   try {
-    const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    // 1️⃣ Update Employee
+    const employee = await Employee.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+
     if (!employee) {
-      return res.status(404).json({ success: false, error: 'Employee not found' });
+      return res.status(404).json({ success: false, error: "Employee not found" });
     }
+
+    // 2️⃣ Sync to User model
+    const userUpdates = {};
+
+    if (req.body.email) userUpdates.email = req.body.email;
+    if (req.body.companyId) userUpdates.companyId = req.body.companyId;
+    if (req.body.role) userUpdates.role = req.body.role; // ✅ update role too
+
+    if (Object.keys(userUpdates).length > 0) {
+      await User.findOneAndUpdate(
+        { employeeId: req.params.id },
+        { $set: userUpdates },
+        { new: true }
+      );
+    }
+
+    // 3️⃣ Send response
     res.status(200).json({ success: true, data: employee });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
