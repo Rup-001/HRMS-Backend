@@ -9,6 +9,8 @@ const leaveRoutes = require('./leaveRoutes');
 const payslipRoutes = require('./payslipRoutes');
 const holidayRoutes = require('./holidayRoutes');
 const deviceLogsRoutes = require('./deviceLogsRoutes')
+const companyRoutes = require('./companyRoutes')
+const documentRoutes = require('./documentRoutes')
 
 const restrictTo = (...roles) => {
   return (req, res, next) => {
@@ -27,11 +29,13 @@ const restrictTo = (...roles) => {
 router.use('/employees', employeeRoutes);
 router.use('/auth', authRoutes);
 router.use('/deviceLogs', deviceLogsRoutes);
-router.use('/dashboard', passport.authenticate('jwt', { session: false }), restrictTo('Employee'), dashboardRoutes);
+router.use('/dashboard',  dashboardRoutes);
 router.use('/attendance', passport.authenticate('jwt', { session: false }), attendanceRoutes);
 router.use('/leave', passport.authenticate('jwt', { session: false }), leaveRoutes);
 router.use('/payslips', passport.authenticate('jwt', { session: false }), payslipRoutes);
 router.use('/holidays', passport.authenticate('jwt', { session: false }), holidayRoutes);
+router.use('/company', passport.authenticate('jwt', { session: false }), companyRoutes);
+router.use('/document', passport.authenticate('jwt', { session: false }), documentRoutes);
 
 router.get('/', (req, res) => res.json({ message: 'HRMS API Running' }));
 

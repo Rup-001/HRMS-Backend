@@ -6,15 +6,15 @@ const employeeSchema = new mongoose.Schema({
   newEmployeeCode: { type: String, unique: true, required: true },
   deviceUserId: { type: String },
   fullName: { type: String, required: true },
-  assignedDepartment: { type: String, required: true },
-  designation: { type: String, required: true },
+  assignedDepartment: { type: String },
+  designation: { type: String },
   currentDesignation: { type: String },
-  joiningDate: { type: Date, required: true },
+  joiningDate: { type: Date },
   lastWorkingDay: { type: Date },
   ageOfService: { type: String },
   personalPhoneNumber: { type: String },
   emergencyContactNumber: { type: String },
-  email: { type: String, required: true },
+  email: { type: String },
   hasIdCard: { type: Boolean, default: false },
   idCardStatus: { type: String },
   presentAddress: { type: String },
@@ -27,7 +27,7 @@ const employeeSchema = new mongoose.Schema({
   motherName: { type: String },
   employeeStatus: { 
     type: String, 
-    enum: ['active', 'inactive', 'terminated', 'resigned', 'probation'], 
+    enum: ['active', 'inactive', 'terminated', 'resigned', 'probation'],
     default: 'active' 
   },
   role: { 
@@ -38,13 +38,11 @@ const employeeSchema = new mongoose.Schema({
   },
   separationType: { type: String },
   appointmentLetter: { type: String },
-  employeeFileStatus: { type: String },
-  fileRemarks: { type: String },
   resume: { type: String },
   nidCopy: { type: String },
-  passportPhoto: { type: String },
-  managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null }  // New field for hierarchy
+  passportSizePhoto: { type: String },
+  managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
+  hasUserAccount: { type: Boolean, default: false }
 }, { timestamps: true });
 
-// module.exports = mongoose.model('Employee', employeeSchema);
-module.exports = mongoose.models.Employee || mongoose.model("Employee", employeeSchema);
+module.exports = mongoose.models.Employee || mongoose.model('Employee', employeeSchema);

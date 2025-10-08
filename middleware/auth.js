@@ -9,10 +9,10 @@ const opts = {
 };
 
 passport.use(new JwtStrategy(opts, async (jwt_payload, done) => {
-  console.log('JWT Payload:', jwt_payload); // Debug payload
+  console.log('JWT Payload:', jwt_payload);
   try {
     const user = await User.findById(jwt_payload.id).select('email role employeeId companyId isActive');
-    console.log('User found:', user); // Debug user
+    console.log('User found:', user);
     if (user && user.isActive) {
       return done(null, user);
     }

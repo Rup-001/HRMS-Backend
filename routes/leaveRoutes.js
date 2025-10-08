@@ -12,8 +12,8 @@ const restrictTo = (...roles) => {
 };
 
 router.post('/',  leaveController.createLeaveRequest);
-router.post('/:id/approve', restrictTo('Manager', 'HR Manager', 'Super Admin', 'Company Admin'), leaveController.approveLeaveRequest);
-router.post('/:id/deny', restrictTo('Manager', 'HR Manager', 'Super Admin', 'Company Admin'), leaveController.denyLeaveRequest);
+router.post('/:id/approve', restrictTo('Manager', 'HR Manager', 'Super Admin', 'Company Admin', 'C-Level Executive'), leaveController.approveLeaveRequest);
+router.post('/:id/deny', restrictTo('Manager', 'HR Manager', 'Super Admin', 'Company Admin' , 'C-Level Executive'), leaveController.denyLeaveRequest);
 router.get('/', leaveController.getLeaveRequests);
 
 module.exports = router;

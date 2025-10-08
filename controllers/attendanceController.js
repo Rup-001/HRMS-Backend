@@ -1,7 +1,7 @@
 const EmployeesAttendance = require('../models/EmployeesAttendance');
 const moment = require('moment-timezone');
 const Log = require('../models/log');
-const Employee = require('../models/employee');
+const Employee = require('../models/Employee');
 
 
 exports.getAttendance = async (req, res) => {

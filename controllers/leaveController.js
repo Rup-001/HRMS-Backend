@@ -1,75 +1,3 @@
-// const LeaveRequest = require('../models/leaveRequest');
-// const moment = require('moment-timezone');
-
-// exports.createLeaveRequest = async (req, res) => {
-//   try {
-//     const { startDate, endDate, type, reason, isHalfDay } = req.body;
-//     if (!startDate || !endDate || !type) {
-//       return res.status(400).json({ success: false, error: 'Missing required fields' });
-//     }
-//     const leaveRequest = new LeaveRequest({
-//       companyId: req.user.companyId,
-//       employeeId: req.user.employeeId,
-//       startDate: moment.tz(startDate, 'Asia/Dhaka').startOf('day').toDate(),
-//       endDate: moment.tz(endDate, 'Asia/Dhaka').endOf('day').toDate(),
-//       type,
-//       reason,
-//       isHalfDay
-//     });
-//     await leaveRequest.save();
-//     res.status(201).json({ success: true, data: leaveRequest });
-//   } catch (error) {
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
-// exports.approveLeaveRequest = async (req, res) => {
-//   try {
-//     const leaveRequest = await LeaveRequest.findById(req.params.id);
-//     if (!leaveRequest) {
-//       return res.status(404).json({ success: false, error: 'Leave request not found' });
-//     }
-//     if (req.user.role === 'Manager' && req.user.companyId.toString() !== leaveRequest.companyId.toString()) {
-//       return res.status(403).json({ success: false, error: 'Company access denied' });
-//     }
-//     leaveRequest.status = 'approved';
-//     leaveRequest.approverId = req.user.employeeId;
-//     await leaveRequest.save();
-//     res.status(200).json({ success: true, data: leaveRequest });
-//   } catch (error) {
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
-// exports.denyLeaveRequest = async (req, res) => {
-//   try {
-//     const leaveRequest = await LeaveRequest.findById(req.params.id);
-//     if (!leaveRequest) {
-//       return res.status(404).json({ success: false, error: 'Leave request not found' });
-//     }
-//     if (req.user.role === 'Manager' && req.user.companyId.toString() !== leaveRequest.companyId.toString()) {
-//       return res.status(403).json({ success: false, error: 'Company access denied' });
-//     }
-//     leaveRequest.status = 'denied';
-//     leaveRequest.approverId = req.user.employeeId;
-//     await leaveRequest.save();
-//     res.status(200).json({ success: true, data: leaveRequest });
-//   } catch (error) {
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
-// exports.getLeaveRequests = async (req, res) => {
-//   try {
-//     const query = req.user.role === 'Employee' ? { employeeId: req.user.employeeId, companyId: req.user.companyId } : 
-//                  req.user.role === 'Manager' ? { companyId: req.user.companyId } : {};
-//     const leaveRequests = await LeaveRequest.find(query).populate('employeeId', 'fullName newEmployeeCode');
-//     res.status(200).json({ success: true, data: leaveRequests });
-//   } catch (error) {
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
 
 const LeaveRequest = require('../models/leaveRequest');
 const EmployeesAttendance = require('../models/EmployeesAttendance');
@@ -225,16 +153,79 @@ exports.denyLeaveRequest = async (req, res) => {
   }
 };
 
+// exports.getLeaveRequests = async (req, res) => {
+//   try {
+//     const query = req.user.role === 'Employee' 
+//       ? { employeeId: req.user.employeeId, companyId: req.user.companyId } 
+//       : req.user.role === 'Manager' 
+//       ? { approverId: req.user.employeeId, companyId: req.user.companyId } 
+//       : { companyId: req.user.companyId };
+//     const leaveRequests = await LeaveRequest.find(query)
+//       .populate('employeeId', 'fullName newEmployeeCode')
+//       .populate('approverId', 'fullName');
+//     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
+//     res.status(200).json({ success: true, data: leaveRequests });
+//   } catch (error) {
+//     console.error(`❌ Error retrieving leave requests: ${error.message}`);
+//     res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
+
+// exports.getLeaveRequests = async (req, res) => {
+//   try {
+//     let query;
+
+//     if (req.user.role === 'Employee') {
+//       query = { employeeId: req.user.employeeId, companyId: req.user.companyId };
+//     } else if (req.user.role === 'Manager') {
+//       query = { approverId: req.user.employeeId, companyId: req.user.companyId };
+//     } else if (['Super Admin', 'C-Level Executive'].includes(req.user.role)) {
+//       // ✅ Super Admin & C Level Executive see everything in their company
+//       query = { companyId: req.user.companyId };
+//     } else {
+//       // Default fallback: restrict to their own company (if you have other roles)
+//       query = { companyId: req.user.companyId };
+//     }
+
+//     const leaveRequests = await LeaveRequest.find(query)
+//       .populate('employeeId', 'fullName newEmployeeCode')
+//       .populate('approverId', 'fullName');
+
+//     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
+//     res.status(200).json({ success: true, data: leaveRequests });
+//   } catch (error) {
+//     console.error(`❌ Error retrieving leave requests: ${error.message}`);
+//     res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
+
 exports.getLeaveRequests = async (req, res) => {
   try {
-    const query = req.user.role === 'Employee' 
-      ? { employeeId: req.user.employeeId, companyId: req.user.companyId } 
-      : req.user.role === 'Manager' 
-      ? { approverId: req.user.employeeId, companyId: req.user.companyId } 
-      : { companyId: req.user.companyId };
+    let query;
+
+    if (req.user.role === 'Employee') {
+      // 🧍 Employee → only their own leave requests
+      query = { employeeId: req.user.employeeId, companyId: req.user.companyId };
+    } else if (req.user.role === 'Manager') {
+      // 👨‍💼 Manager → only those they need to approve
+      query = { approverId: req.user.employeeId, companyId: req.user.companyId };
+    } else if (req.user.role === 'Super Admin') {
+      // 🧑‍💻 Super Admin → all requests within their company
+      query = { companyId: req.user.companyId };
+    } else if (req.user.role === 'C-Level Executive') {
+      // 🏢 C Level Executive → all requests across all companies
+      query = {}; // ✅ No filter = see everything
+    } else {
+      // 🛡️ Default: restrict to same company
+      query = { companyId: req.user.companyId };
+    }
+
     const leaveRequests = await LeaveRequest.find(query)
       .populate('employeeId', 'fullName newEmployeeCode')
       .populate('approverId', 'fullName');
+
     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
     res.status(200).json({ success: true, data: leaveRequests });
   } catch (error) {

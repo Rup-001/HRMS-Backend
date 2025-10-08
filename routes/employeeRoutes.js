@@ -1,24 +1,8 @@
-// const express = require('express');
-// const router = express.Router();
-// const employeeController = require('../controllers/employeeController');
-
-// // CRUD routes
-// router.post('/', employeeController.createEmployee);
-// router.patch('/:id', employeeController.updateEmployee);
-// router.get('/', employeeController.getEmployees);
-// router.get('/:id', employeeController.getEmployeeById);
-// // router.put('/:id', employeeController.updateEmployee);
-// router.delete('/:id', employeeController.deleteEmployee);
-// router.get('/DeviceLogs', employeeController.getEmployeeDeviceLogs);
-
-
-// module.exports = router;
-
-
 const express = require('express');
 const router = express.Router();
 const passport = require('../middleware/auth');
 const employeeController = require('../controllers/employeeController');
+const { uploadFiles } = require('../middleware/upload');
 
 const restrictTo = (...roles) => {
   return (req, res, next) => {
@@ -34,11 +18,26 @@ const restrictTo = (...roles) => {
   };
 };
 
-router.post('/', passport.authenticate('jwt', { session: false }), restrictTo('HR Manager', 'Super Admin', 'Company Admin'), employeeController.createEmployee);
-router.patch('/:id', passport.authenticate('jwt', { session: false }), restrictTo('HR Manager', 'Super Admin', 'Company Admin'), employeeController.updateEmployee);
-router.get('/', passport.authenticate('jwt', { session: false }), restrictTo('HR Manager', 'Super Admin', 'Company Admin'), employeeController.getEmployees);
-router.get('/:id', passport.authenticate('jwt', { session: false }), employeeController.getEmployeeById);
-router.delete('/:id', passport.authenticate('jwt', { session: false }), restrictTo('HR Manager', 'Super Admin', 'Company Admin'), employeeController.deleteEmployee);
-router.get('/deviceLogs', passport.authenticate('jwt', { session: false }), restrictTo('HR Manager', 'Super Admin', 'Company Admin'), employeeController.getEmployeeDeviceLogs);
+router.post('/', 
+  passport.authenticate('jwt', { session: false }), 
+  restrictTo('HR Manager', 'Super Admin', 'Company Admin' ), 
+  uploadFiles, 
+  employeeController.createEmployee
+);
+router.patch('/:id', 
+  passport.authenticate('jwt', { session: false }), 
+  restrictTo('HR Manager', 'Super Admin', 'Company Admin'), 
+  uploadFiles, 
+  employeeController.updateEmployee
+);
+router.get('/', 
+  passport.authenticate('jwt', { session: false }), 
+  restrictTo('HR Manager', 'Super Admin', 'Company Admin', 'C-Level Executive'), 
+  employeeController.getEmployees
+);
+router.get('/:id', 
+  passport.authenticate('jwt', { session: false }), 
+  employeeController.getEmployeeById
+);
 
 module.exports = router;
