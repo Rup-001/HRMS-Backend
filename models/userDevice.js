@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const userDeviceSchema = new mongoose.Schema({
-  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
   userId: { type: String, required: true },
   name: { type: String },
   role: { type: String },

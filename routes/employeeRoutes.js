@@ -40,4 +40,9 @@ router.get('/:id',
   employeeController.getEmployeeById
 );
 
+router.get('/department/:departmentId/managers',
+  passport.authenticate('jwt', { session: false }),
+  employeeController.getPotentialManagers
+);
+
 module.exports = router;

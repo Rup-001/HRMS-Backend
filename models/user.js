@@ -34,7 +34,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const userSchema = new mongoose.Schema({
-  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },

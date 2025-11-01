@@ -1,14 +1,13 @@
 const mongoose = require('mongoose');
 
 const employeeSchema = new mongoose.Schema({
-  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company'},
   oldEmployeeCode: { type: String },
-  newEmployeeCode: { type: String, unique: true, required: true },
+  newEmployeeCode: { type: String, unique: true },
   deviceUserId: { type: String },
   fullName: { type: String, required: true },
-  assignedDepartment: { type: String },
-  designation: { type: String },
-  currentDesignation: { type: String },
+  department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
+  designation: { type: mongoose.Schema.Types.ObjectId, ref: 'Designation' },
   joiningDate: { type: Date },
   lastWorkingDay: { type: Date },
   ageOfService: { type: String },

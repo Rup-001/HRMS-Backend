@@ -1,5 +1,7 @@
 
 const LeaveRequest = require('../models/leaveRequest');
+const LeaveEntitlement = require('../models/leaveEntitlement');
+const LeavePolicy = require('../models/leavePolicy');
 const EmployeesAttendance = require('../models/EmployeesAttendance');
 const Employee = require('../models/employee');
 const moment = require('moment-timezone');
@@ -57,6 +59,38 @@ exports.createLeaveRequest = async (req, res) => {
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
+    // Calculate leave duration
+    const leaveDuration = moment(end).diff(moment(start), 'days') + 1;
+
+    // Check leave entitlement
+    if (type !== 'remote') { // Remote work does not deduct from leave balance
+      const year = moment(start).year();
+      const entitlement = await LeaveEntitlement.findOne({ employeeId: req.user.employeeId, year });
+
+      if (!entitlement) {
+        return res.status(400).json({ success: false, error: 'Leave entitlement not found for current year.' });
+      }
+
+      // Calculate leave taken for the current year
+      const approvedLeaves = await LeaveRequest.find({
+        employeeId: req.user.employeeId,
+        status: 'approved',
+        type: type,
+        $expr: { $eq: [{ $year: "$startDate" }, year] }
+      });
+
+      let leaveTaken = 0;
+      for (const leave of approvedLeaves) {
+        leaveTaken += leave.isHalfDay ? 0.5 : (moment(leave.endDate).diff(moment(leave.startDate), 'days') + 1);
+      }
+
+      const availableLeave = entitlement[type] - leaveTaken;
+
+      if (availableLeave < (isHalfDay ? 0.5 : leaveDuration)) {
+        return res.status(400).json({ success: false, error: `Insufficient ${type} leave. Available: ${availableLeave} days.` });
+      }
+    }
+
     const leaveRequest = new LeaveRequest({
       companyId: req.user.companyId,
       employeeId: req.user.employeeId,
@@ -87,6 +121,20 @@ exports.approveLeaveRequest = async (req, res) => {
     leaveRequest.status = 'approved';
     leaveRequest.approverId = req.user.employeeId;
     await leaveRequest.save();
+
+    // Deduct leave from entitlement
+    const leaveDuration = moment(leaveRequest.endDate).diff(moment(leaveRequest.startDate), 'days') + 1;
+    const leaveType = leaveRequest.type;
+    const year = moment(leaveRequest.startDate).year();
+
+    if (leaveType !== 'remote') { // Do not deduct for remote work
+      const entitlement = await LeaveEntitlement.findOne({ employeeId: leaveRequest.employeeId, year });
+      if (entitlement && entitlement[leaveType] !== undefined) {
+        entitlement[leaveType] -= leaveRequest.isHalfDay ? 0.5 : leaveDuration;
+        await entitlement.save();
+        console.log(`✅ Deducted ${leaveRequest.isHalfDay ? 0.5 : leaveDuration} days of ${leaveType} leave for employee ${leaveRequest.employeeId}`);
+      }
+    }
 
     // Update EmployeesAttendance for each date in the range
     const status = leaveRequest.type === 'remote' ? 'Remote' : 'Leave';
@@ -230,6 +278,198 @@ exports.getLeaveRequests = async (req, res) => {
     res.status(200).json({ success: true, data: leaveRequests });
   } catch (error) {
     console.error(`❌ Error retrieving leave requests: ${error.message}`);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+exports.getLeaveSummary = async (req, res) => {
+  try {
+    const employeeId = req.user.employeeId;
+    const year = req.query.year || moment().year();
+
+    const entitlement = await LeaveEntitlement.findOne({ employeeId, year });
+    if (!entitlement) {
+      return res.status(404).json({ success: false, error: 'Leave entitlement not found for the specified year' });
+    }
+
+    const approvedLeaves = await LeaveRequest.find({
+      employeeId,
+      status: 'approved',
+      $expr: { $eq: [{ $year: "$startDate" }, year] }
+    });
+
+    const leaveTaken = {
+      casual: 0,
+      sick: 0,
+      earned: 0,
+      maternity: 0,
+      paternity: 0,
+      bereavement: 0
+    };
+
+    for (const leave of approvedLeaves) {
+      if (leave.type !== 'remote') {
+        const duration = moment(leave.endDate).diff(moment(leave.startDate), 'days') + 1;
+        leaveTaken[leave.type] += leave.isHalfDay ? 0.5 : duration;
+      }
+    }
+
+    const summary = {
+      year,
+      entitlement: entitlement.toObject(),
+      leaveTaken,
+      balance: {
+        casual: entitlement.casual - leaveTaken.casual,
+        sick: entitlement.sick - leaveTaken.sick,
+        earned: entitlement.earned - leaveTaken.earned,
+        maternity: entitlement.maternity - leaveTaken.maternity,
+        paternity: entitlement.paternity - leaveTaken.paternity,
+        bereavement: entitlement.bereavement - leaveTaken.bereavement
+      }
+    };
+
+    res.status(200).json({ success: true, data: summary });
+  } catch (error) {
+    console.error(`❌ Error getting leave summary: ${error.message}`);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+// ================= Leave Entitlement Functions =================
+exports.createLeaveEntitlement = async (employeeId, joiningDate) => {
+  try {
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      throw new Error('Employee not found');
+    }
+
+    const companyId = employee.companyId;
+    let leavePolicy = await LeavePolicy.findOne({ companyId });
+
+    if (!leavePolicy) {
+      // If no policy exists for the company, create a default one
+      leavePolicy = new LeavePolicy({ companyId });
+      await leavePolicy.save();
+    }
+
+    const year = moment(joiningDate).year();
+    const startOfYear = moment(joiningDate).startOf('year');
+    const daysInYear = moment(joiningDate).isLeapYear() ? 366 : 365;
+    const remainingDays = daysInYear - moment(joiningDate).dayOfYear();
+
+    const proratedCasual = Math.round((leavePolicy.casual / daysInYear) * remainingDays);
+    const proratedSick = Math.round((leavePolicy.sick / daysInYear) * remainingDays);
+    const proratedEarned = Math.round((leavePolicy.earned / daysInYear) * remainingDays);
+
+    const newEntitlement = new LeaveEntitlement({
+      employeeId,
+      year,
+      casual: proratedCasual,
+      sick: proratedSick,
+      earned: proratedEarned,
+      maternity: leavePolicy.maternity,
+      paternity: leavePolicy.paternity,
+      bereavement: leavePolicy.bereavement,
+      festive: leavePolicy.festive
+    });
+
+    await newEntitlement.save();
+    console.log(`✅ Created leave entitlement for employee: ${employeeId}`);
+    return newEntitlement;
+  } catch (error) {
+    console.error(`❌ Error creating leave entitlement: ${error.message}`);
+    throw error;
+  }
+};
+
+exports.getLeaveEntitlement = async (req, res) => {
+  try {
+    const employeeId = req.params.employeeId || req.user.employeeId;
+    const year = req.query.year || moment().year();
+
+    const entitlement = await LeaveEntitlement.findOne({ employeeId, year });
+    if (!entitlement) {
+      return res.status(404).json({ success: false, error: 'Leave entitlement not found' });
+    }
+
+    res.status(200).json({ success: true, data: entitlement });
+  } catch (error) {
+    console.error(`❌ Error getting leave entitlement: ${error.message}`);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+exports.updateLeaveEntitlement = async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { year, ...updatedValues } = req.body;
+
+    const entitlement = await LeaveEntitlement.findOneAndUpdate(
+      { employeeId, year: year || moment().year() },
+      { $set: updatedValues },
+      { new: true, runValidators: true }
+    );
+
+    if (!entitlement) {
+      return res.status(404).json({ success: false, error: 'Leave entitlement not found to update' });
+    }
+
+    res.status(200).json({ success: true, data: entitlement });
+  } catch (error) {
+    console.error(`❌ Error updating leave entitlement: ${error.message}`);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+// ================= Leave Policy Functions =================
+exports.getLeavePolicy = async (req, res) => {
+  try {
+    const policy = await LeavePolicy.findOne({ companyId: req.user.companyId });
+    if (!policy) {
+      // If no policy exists, create a default one
+      const newPolicy = new LeavePolicy({ companyId: req.user.companyId });
+      await newPolicy.save();
+      return res.status(200).json({ success: true, data: newPolicy });
+    }
+    res.status(200).json({ success: true, data: policy });
+  } catch (error) {
+    console.error(`❌ Error getting leave policy: ${error.message}`);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+exports.updateLeavePolicy = async (req, res) => {
+  try {
+    const policy = await LeavePolicy.findOneAndUpdate(
+      { companyId: req.user.companyId },
+      { $set: req.body },
+      { new: true, runValidators: true, upsert: true }
+    );
+    res.status(200).json({ success: true, data: policy });
+  } catch (error) {
+    console.error(`❌ Error updating leave policy: ${error.message}`);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+// ================= Generate Missing Leave Entitlements =================
+exports.generateMissingLeaveEntitlements = async (req, res) => {
+  try {
+    const currentYear = moment().year();
+    const employees = await Employee.find({ companyId: req.user.companyId, employeeStatus: 'active' });
+    let generatedCount = 0;
+
+    for (const employee of employees) {
+      const existingEntitlement = await LeaveEntitlement.findOne({ employeeId: employee._id, year: currentYear });
+      if (!existingEntitlement && employee.joiningDate) {
+        await exports.createLeaveEntitlement(employee._id, employee.joiningDate);
+        generatedCount++;
+      }
+    }
+
+    res.status(200).json({ success: true, message: `Generated ${generatedCount} missing leave entitlements for ${currentYear}.` });
+  } catch (error) {
+    console.error(`❌ Error generating missing leave entitlements: ${error.message}`);
     res.status(400).json({ success: false, error: error.message });
   }
 };

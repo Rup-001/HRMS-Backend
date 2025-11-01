@@ -6,18 +6,23 @@ exports.createCompany = async (req, res) => {
   try {
     console.log('createCompany - Request body:', req.body);
 
-    const { name } = req.body;
+    const { name, abbreviation, employeeIdBase } = req.body;
 
-    if (!name) {
-      throw new Error('Company name is required');
+    if (!name || !abbreviation || !employeeIdBase) {
+      throw new Error('Company name, abbreviation, and employeeIdBase are required');
     }
 
     if (await Company.findOne({ name })) {
       throw new Error('Company name must be unique');
     }
+    if (await Company.findOne({ abbreviation })) {
+      throw new Error('Company abbreviation must be unique');
+    }
 
     company = new Company({
       name,
+      abbreviation,
+      employeeIdBase,
       isActive: true
     });
 

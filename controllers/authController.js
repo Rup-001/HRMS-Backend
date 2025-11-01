@@ -1,7 +1,9 @@
 const User = require('../models/user');
-const Invitation = require('../models/invitation');
+const Invitation = require('../models/Invitation');
 const PasswordReset = require('../models/passwordReset');
-const Employee = require('../models/Employee');
+const Employee = require('../models/employee');
+const Company = require('../models/company');
+const LeavePolicy = require('../models/leavePolicy');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const moment = require('moment-timezone');
@@ -181,5 +183,77 @@ exports.resetPassword = async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   } finally {
     console.log('resetPassword - Execution completed');
+  }
+};
+
+// ================= INITIAL SETUP (FIRST SUPER ADMIN) =================
+exports.initialSetup = async (req, res) => {
+  try {
+    // 1. Check if any users already exist
+    const existingUser = await User.findOne();
+    if (existingUser) {
+      return res.status(403).json({ success: false, error: 'Initial setup already completed. Users exist.' });
+    }
+
+    const { fullName, email, password /*, companyName*/ } = req.body;
+    if (!fullName || !email || !password /*|| !companyName*/) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: fullName, email, password /*, companyName*/' });
+    }
+
+    // 2. Create the first company
+    // let company = await Company.findOne({ name: companyName });
+    // if (!company) {
+    //   company = new Company({ name: companyName, employeeIdBase: 1000 }); // Default base for employee IDs
+    //   await company.save();
+    //   console.log('initialSetup - Created initial company:', company.name);
+    // }
+
+    // 3. Create a default leave policy for the new company
+    // let leavePolicy = await LeavePolicy.findOne({ companyId: company._id });
+    // if (!leavePolicy) {
+    //   leavePolicy = new LeavePolicy({ companyId: company._id });
+    //   await leavePolicy.save();
+    //   console.log('initialSetup - Created default leave policy for company:', company.name);
+    // }
+
+    // 4. Create the first employee (Super Admin)
+    // const newEmployeeCode = (company.employeeIdBase + 1).toString(); // First employee gets base + 1
+    const employee = new Employee({
+      fullName,
+      email,
+      // newEmployeeCode,
+      // companyId: company._id,
+      role: 'Super Admin',
+      employeeStatus: 'active',
+      joiningDate: new Date(),
+      hasUserAccount: true
+    });
+    await employee.save();
+    console.log('initialSetup - Created initial Super Admin employee:', employee.fullName);
+
+    // 5. Create the first user (Super Admin)
+    const user = new User({
+      employeeId: employee._id,
+      // companyId: company._id,
+      email,
+      password,
+      role: 'Super Admin',
+      isActive: true,
+      invitationStatus: 'accepted'
+    });
+    await user.save();
+    console.log('initialSetup - Created initial Super Admin user:', user.email);
+
+    // 6. Generate token for the new Super Admin
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role, employeeId: user.employeeId /*, companyId: user.companyId*/ },
+      process.env.JWT_SECRET || 'your_jwt_secret',
+      { expiresIn: '24h' }
+    );
+
+    res.status(201).json({ success: true, message: 'Initial setup complete. Super Admin created.', token });
+  } catch (error) {
+    console.error('initialSetup - Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
