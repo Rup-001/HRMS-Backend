@@ -60,8 +60,9 @@ exports.createEmployee = async (req, res) => {
     }
 
     const basePrefix = company.employeeIdBase.toString();
-    const finalRole = req.user.role === 'Super Admin' && role ? role : 'Employee';
-
+    // const finalRole = req.user.role === 'Super Admin' && role ? role : 'Employee';
+const allowedToSetRole = ['Super Admin', 'HR Manager'].includes(req.user.role);
+const finalRole = allowedToSetRole && role ? role : 'Employee';
     // ---------- FILE UPLOAD ----------
     const fileFields = ['passportSizePhoto', 'appointmentLetter', 'resume', 'nidCopy'];
     for (const field of fileFields) {
@@ -512,6 +513,7 @@ exports.updateEmployee = async (req, res) => {
     console.log('updateEmployee - Files:', req.files);
 
     const { createUser = false, createDeviceUser = false } = req.body;
+    const canEditRole = ['Super Admin', 'HR Manager'].includes(req.user.role);
 
     const employee = await Employee.findById(req.params.id);
     if (!employee) {
@@ -546,7 +548,8 @@ exports.updateEmployee = async (req, res) => {
     const allowedUpdates = {
       fullName: req.body.fullName,
       email: req.body.email,
-      role: req.user.role === 'Super Admin' ? req.body.role : employee.role,
+      // role: req.user.role === 'Super Admin' ? req.body.role : employee.role,
+      role: canEditRole && req.body.role ? req.body.role : employee.role,
       companyId: req.body.companyId,
       joiningDate: req.body.joiningDate,
       department: req.body.department,
@@ -620,7 +623,8 @@ exports.updateEmployee = async (req, res) => {
         employeeId: employee._id,
         email: req.body.email,
         password: temporaryPassword,
-        role: req.user.role === 'Super Admin' ? (req.body.role || employee.role) : 'Employee',
+        // role: req.user.role === 'Super Admin' ? (req.body.role || employee.role) : 'Employee',
+        role: canEditRole && req.body.role ? req.body.role : 'Employee',
         invitationStatus: 'sent'
       });
       await user.save();

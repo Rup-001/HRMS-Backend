@@ -27,6 +27,7 @@ docker-compose.yml
 # Editor files
 .vscode/
 .idea/
+.grok/
 *.suo
 *.ntvs*
 *.njsproj

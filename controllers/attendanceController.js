@@ -221,9 +221,13 @@ exports.createAdjustmentRequest = async (req, res) => {
     if (!employee) {
       return res.status(404).json({ success: false, error: 'Employee not found' });
     }
-    if (!employee.managerId) {
-      return res.status(400).json({ success: false, error: 'Employee does not have an assigned manager for approval' });
-    }
+    // if (!employee.managerId) {
+    //   return res.status(400).json({ success: false, error: 'Employee does not have an assigned manager for approval' });
+    // }
+    const manager = await Employee.findById(employee.managerId);
+if (!manager || !['Manager', 'C-Level Executive', 'HR Manager', 'Company Admin', 'Super Admin'].includes(manager.role)) {
+  return res.status(400).json({ success: false, error: 'No valid manager assigned for approval' });
+}
 
     const targetDate = moment.utc(attendanceDate, 'YYYY-MM-DD').startOf('day').toDate();
 
@@ -279,7 +283,10 @@ exports.managerReviewAdjustment = async (req, res) => {
     }
 
     // Ensure the manager is the assigned approver for this request
-    if (request.managerApproverId.toString() !== req.user.employeeId.toString()) {
+    // if (request.managerApproverId.toString() !== req.user.employeeId.toString()) {
+    const reviewer = await Employee.findById(req.user.employeeId);
+if (request.managerApproverId.toString() !== req.user.employeeId.toString() || 
+    !['Manager', 'C-Level Executive', 'HR Manager', 'Company Admin', 'Super Admin'].includes(reviewer.role)) {
       return res.status(403).json({ success: false, error: 'You are not authorized to review this request' });
     }
     if (request.status !== 'pending_manager_approval') {
