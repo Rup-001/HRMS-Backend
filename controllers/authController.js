@@ -73,6 +73,7 @@ exports.acceptInvitation = async (req, res) => {
     user.password = newPassword;
     user.isActive = true;
     user.invitationStatus = 'accepted';
+    user.invitationExpires = null;
     await user.save();
     invitation.accepted = true;
     await invitation.save();
@@ -183,6 +184,57 @@ exports.resetPassword = async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   } finally {
     console.log('resetPassword - Execution completed');
+  }
+};
+
+exports.resendInvitation = async (req, res) => {
+  try {
+    const { email } = req.body;
+    console.log('resendInvitation - Request body:', { email });
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      console.log('resendInvitation - User not found for email:', email);
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const temporaryPassword = crypto.randomBytes(8).toString('hex');
+    const invitationToken = crypto.randomBytes(32).toString('hex');
+    const invitationExpires = moment().add(3, 'days').toDate();
+
+    const invitation = new Invitation({
+      companyId: user.companyId,
+      email: user.email,
+      employeeId: user.employeeId,
+      token: invitationToken,
+      temporaryPassword,
+      expiresAt: invitationExpires,
+    });
+    await invitation.save();
+
+    user.password = temporaryPassword;
+    user.invitationStatus = 'sent';
+    user.invitationExpires = invitationExpires;
+    await user.save();
+
+    const invitationLink = `${process.env.FRONTEND_URL}/accept-invitation?token=${invitationToken}`;
+    
+    await transporter.sendMail({
+      from: process.env.ZOHO_EMAIL,
+      to: user.email,
+      subject: 'HRMS Invitation',
+      html: `Welcome to the HRMS! Your temporary password is: <b>${temporaryPassword}</b><br>
+             Accept invitation: <a href="${invitationLink}">Click Here</a><br>
+             Expires on ${moment(invitationExpires).format('YYYY-MM-DD')}.`
+    });
+
+    console.log('resendInvitation - Invitation resent to:', user.email);
+    res.status(200).json({ success: true, message: 'Invitation resent successfully' });
+  } catch (error) {
+    console.error('resendInvitation - Error:', error);
+    res.status(400).json({ success: false, error: error.message });
+  } finally {
+    console.log('resendInvitation - Execution completed');
   }
 };
 

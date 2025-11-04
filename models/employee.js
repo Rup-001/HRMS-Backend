@@ -4,7 +4,9 @@ const employeeSchema = new mongoose.Schema({
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company'},
   oldEmployeeCode: { type: String },
   newEmployeeCode: { type: String, unique: true },
-  deviceUserId: { type: String },
+  // deviceUserId: { type: String },
+deviceUserId: { type: String, unique: true, sparse: true },
+deviceUid: { type: Number, unique: true, sparse: true },
   fullName: { type: String, required: true },
   department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
   designation: { type: mongoose.Schema.Types.ObjectId, ref: 'Designation' },
@@ -42,6 +44,7 @@ const employeeSchema = new mongoose.Schema({
   passportSizePhoto: { type: String },
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   hasUserAccount: { type: Boolean, default: false }
-}, { timestamps: true });
+}, { timestamps: true },
 
+);
 module.exports = mongoose.models.Employee || mongoose.model('Employee', employeeSchema);

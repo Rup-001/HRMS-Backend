@@ -282,20 +282,90 @@ exports.getLeaveRequests = async (req, res) => {
   }
 };
 
+// exports.getLeaveSummary = async (req, res) => {
+//   try {
+//     const employeeId = req.user.employeeId;
+//     const year = req.query.year || moment().year();
+
+//     const entitlement = await LeaveEntitlement.findOne({ employeeId, year });
+//     if (!entitlement) {
+//       return res.status(404).json({ success: false, error: 'Leave entitlement not found for the specified year' });
+//     }
+
+//     const approvedLeaves = await LeaveRequest.find({
+//       employeeId,
+//       status: 'approved',
+//       $expr: { $eq: [{ $year: "$startDate" }, year] }
+//     });
+
+//     const leaveTaken = {
+//       casual: 0,
+//       sick: 0,
+//       earned: 0,
+//       maternity: 0,
+//       paternity: 0,
+//       bereavement: 0
+//     };
+
+//     for (const leave of approvedLeaves) {
+//       if (leave.type !== 'remote') {
+//         const duration = moment(leave.endDate).diff(moment(leave.startDate), 'days') + 1;
+//         leaveTaken[leave.type] += leave.isHalfDay ? 0.5 : duration;
+//       }
+//     }
+
+//     const summary = {
+//       year,
+//       entitlement: entitlement.toObject(),
+//       leaveTaken,
+//       balance: {
+//         casual: entitlement.casual - leaveTaken.casual,
+//         sick: entitlement.sick - leaveTaken.sick,
+//         earned: entitlement.earned - leaveTaken.earned,
+//         maternity: entitlement.maternity - leaveTaken.maternity,
+//         paternity: entitlement.paternity - leaveTaken.paternity,
+//         bereavement: entitlement.bereavement - leaveTaken.bereavement
+//       }
+//     };
+
+//     res.status(200).json({ success: true, data: summary });
+//   } catch (error) {
+//     console.error(`❌ Error getting leave summary: ${error.message}`);
+//     res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
 exports.getLeaveSummary = async (req, res) => {
   try {
-    const employeeId = req.user.employeeId;
-    const year = req.query.year || moment().year();
+    const { year, employeeId: queryEmployeeId } = req.query;
+    const requestingUser = req.user;
 
-    const entitlement = await LeaveEntitlement.findOne({ employeeId, year });
+    let employeeId;
+    if (['Super Admin', 'HR Manager'].includes(requestingUser.role) && queryEmployeeId) {
+      employeeId = queryEmployeeId;
+    } else {
+      employeeId = requestingUser.employeeId;
+    }
+
+    const summaryYear = year || moment().year();
+
+    let entitlement = await LeaveEntitlement.findOne({ employeeId, year: summaryYear });
     if (!entitlement) {
-      return res.status(404).json({ success: false, error: 'Leave entitlement not found for the specified year' });
+      entitlement = {
+        casual: 0,
+        sick: 0,
+        earned: 0,
+        maternity: 0,
+        paternity: 0,
+        bereavement: 0,
+        festive: 0,
+      };
     }
 
     const approvedLeaves = await LeaveRequest.find({
       employeeId,
       status: 'approved',
-      $expr: { $eq: [{ $year: "$startDate" }, year] }
+      $expr: { $eq: [{ $year: "$startDate" }, parseInt(summaryYear)] }
     });
 
     const leaveTaken = {
@@ -315,8 +385,8 @@ exports.getLeaveSummary = async (req, res) => {
     }
 
     const summary = {
-      year,
-      entitlement: entitlement.toObject(),
+      year: summaryYear,
+      entitlement: entitlement,
       leaveTaken,
       balance: {
         casual: entitlement.casual - leaveTaken.casual,

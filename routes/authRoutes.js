@@ -144,6 +144,8 @@ router.post('/reset-password/:userId',
  */
 router.post('/reset-password', authController.resetPassword);
 
+router.post('/resend-invitation', passport.authenticate('jwt', { session: false }), authController.resendInvitation);
+
 /**
  * @swagger
  * /api/initial-setup:

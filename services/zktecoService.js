@@ -273,36 +273,223 @@ async syncDeviceLogs() {
   }
 }
 
+// async setUser(userid, name) {
+//   try {
+//     await this.connect();
+
+//     // Get all users to find the next available UID
+//     const users = (await this.device.getUsers()).data || [];
+//     const nextUid = users.reduce((maxUid, user) => Math.max(maxUid, user.uid), 0) + 1;
+
+//     // Call the zkteco-js setUser method with the new UID
+//     const result = await this.device.setUser(nextUid, userid, name, '', 0, 0);
+//     console.log(`👤 User created: ${userid} (${name}) with UID: ${nextUid}`);
+
+//     // Update or create user in UserDevice model
+//     await UserDevice.updateOne(
+//       { userId: userid },
+//       {
+//         $set: {
+//           uid: nextUid,
+//           userId: userid,
+//           name: name,
+//         }
+//       },
+//       { upsert: true }
+//     );
+
+//     await this.disconnect();
+//     return { success: true, message: 'User created successfully', data: result };
+//   } catch (error) {
+//     await this.disconnect();
+//     throw new Error(`Failed to create user: ${error.message}`);
+//   }
+// }
+
+// async setUser(userid, name) {
+//   const maxRetries = 3;
+//   let attempt = 0;
+
+//   while (attempt < maxRetries) {
+//     attempt++;
+//     try {
+//       await this.connect();
+
+//       const users = (await this.device.getUsers()).data || [];
+//       const existingUser = users.find(u => u && u.userId === userid);
+
+//       if (existingUser) {
+//         // Already exists → just sync DB
+//         await UserDevice.updateOne(
+//           { userId: userid },
+//           { $set: { uid: existingUser.uid, userId: userid, name } },
+//           { upsert: true }
+//         );
+//         await this.disconnect();
+//         console.log(`ZKService - User already exists on device: ${userid} (UID: ${existingUser.uid})`);
+//         return { success: true, exists: true, uid: existingUser.uid };
+//       }
+
+//       // Find next available UID
+//       const nextUid = users.length > 0 
+//         ? Math.max(...users.map(u => u.uid || 0)) + 1 
+//         : 1;
+
+//       if (nextUid > 65535) {
+//         throw new Error('Device UID limit reached (65535)');
+//       }
+
+//       const result = await this.device.setUser(nextUid, userid, name, '', 0, 0);
+//       console.log(`ZKService - User created: ${userid} (UID: ${nextUid})`);
+
+//       // Save to UserDevice
+//       await UserDevice.updateOne(
+//         { userId: userid },
+//         { $set: { uid: nextUid, userId: userid, name } },
+//         { upsert: true }
+//       );
+
+//       await this.disconnect();
+//       return { success: true, created: true, uid: nextUid };
+
+//     } catch (error) {
+//       await this.disconnect();
+//       console.error(`setUser attempt ${attempt} failed:`, error.message);
+
+//       if (attempt === maxRetries) {
+//         throw new Error(`Failed to create user after ${maxRetries} attempts: ${error.message}`);
+//       }
+
+//       // Wait before retry
+//       await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+//     }
+//   }
+// }
+
+
+// async setUser(userid, name) {
+//   const maxRetries = 3;
+//   let attempt = 0;
+
+//   while (attempt < maxRetries) {
+//     attempt++;
+//     try {
+//       await this.connect();
+//       const users = (await this.device.getUsers()).data || [];
+//       const existing = users.find(u => u.userId === userid);
+
+//       if (existing) {
+//         await UserDevice.updateOne(
+//           { userId: userid },
+//           { $set: { uid: existing.uid, userId: userid, name } },
+//           { upsert: true }
+//         );
+//         await this.disconnect();
+//         return { success: true, exists: true, uid: existing.uid };
+//       }
+
+//       const nextUid = users.length > 0 
+//         ? Math.max(...users.map(u => u.uid || 0)) + 1 
+//         : 1;
+
+//       if (nextUid > 65535) throw new Error('Device full');
+
+//       await this.device.setUser(nextUid, userid, name, '', 0, 0);
+//       console.log(`ZK: Created ${userid} → UID ${nextUid}`);
+
+//       await UserDevice.updateOne(
+//         { userId: userid },
+//         { $set: { uid: nextUid, userId: userid, name } },
+//         { upsert: true }
+//       );
+
+//       await this.disconnect();
+//       return { success: true, created: true, uid: nextUid };
+
+//     } catch (error) {
+//       await this.disconnect();
+//       if (attempt === maxRetries) throw error;
+//       await new Promise(r => setTimeout(r, 1000 * attempt));
+//     }
+//   }
+// }
+
+
 async setUser(userid, name) {
+  const maxRetries = 3;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await this.connect();
+      const users = (await this.device.getUsers()).data || [];
+      const existing = users.find(u => u.userId === userid);
+
+      if (existing) {
+        await this.disconnect();
+        return { success: true, exists: true, uid: existing.uid };
+      }
+
+      const nextUid = users.length > 0 
+        ? Math.max(...users.map(u => u.uid || 0)) + 1 
+        : 1;
+
+      if (nextUid > 65535) {
+        await this.disconnect();
+        return { success: false, error: 'Device UID limit reached' };
+      }
+
+      const result = await this.device.setUser(nextUid, userid, name, '', 0, 0);
+      console.log(`ZK: Created ${userid} → UID ${nextUid}`);
+
+      await UserDevice.updateOne(
+        { userId: userid },
+        { $set: { uid: nextUid, userId: userid, name } },
+        { upsert: true }
+      );
+
+      await this.disconnect();
+      return { success: true, created: true, uid: nextUid };
+
+    } catch (error) {
+      await this.disconnect();
+      console.error(`setUser attempt ${i + 1} failed:`, error.message);
+      if (i === maxRetries - 1) {
+        return { success: false, error: error.message };
+      }
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+}
+// 🔹 Get user by userId (employee code)
+async getUserByUserId(userId) {
   try {
     await this.connect();
-
-    // Get all users to find the next available UID
     const users = (await this.device.getUsers()).data || [];
-    const nextUid = users.reduce((maxUid, user) => Math.max(maxUid, user.uid), 0) + 1;
-
-    // Call the zkteco-js setUser method with the new UID
-    const result = await this.device.setUser(nextUid, userid, name, '', 0, 0);
-    console.log(`👤 User created: ${userid} (${name}) with UID: ${nextUid}`);
-
-    // Update or create user in UserDevice model
-    await UserDevice.updateOne(
-      { userId: userid },
-      {
-        $set: {
-          uid: nextUid,
-          userId: userid,
-          name: name,
-        }
-      },
-      { upsert: true }
-    );
-
+    const user = users.find(u => u && u.userId === userId);
     await this.disconnect();
-    return { success: true, message: 'User created successfully', data: result };
+    return user || null;
   } catch (error) {
     await this.disconnect();
-    throw new Error(`Failed to create user: ${error.message}`);
+    console.error('getUserByUserId error:', error.message);
+    return null;
+  }
+}
+
+
+// ZKService.js
+async checkUserExistsOnDevice(userId) {
+  const maxRetries = 2;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await this.connect();
+      const users = (await this.device.getUsers()).data || [];
+      const exists = users.some(u => u && u.userId === userId);
+      await this.disconnect();
+      return exists;
+    } catch (error) {
+      await this.disconnect();
+      if (i === maxRetries - 1) throw error;
+      await new Promise(r => setTimeout(r, 1000));
+    }
   }
 }
 }
