@@ -1,6 +1,6 @@
 const Employee = require('../models/employee');
 const User = require('../models/user');
-const Invitation = require('../models/Invitation');
+const Invitation = require('../models/invitation');
 const Company = require('../models/company');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');

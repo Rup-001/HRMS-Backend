@@ -1,6 +1,6 @@
 const Payslip = require('../models/payslip');
 const Salary = require('../models/salary');
-const EmployeesAttendance = require('../models/EmployeesAttendance');
+const EmployeesAttendance = require('../models/employeesAttendance');
 const LeaveRequest = require('../models/leaveRequest');
 const moment = require('moment-timezone');
 

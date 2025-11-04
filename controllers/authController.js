@@ -1,5 +1,5 @@
 const User = require('../models/user');
-const Invitation = require('../models/Invitation');
+const Invitation = require('../models/invitation');
 const PasswordReset = require('../models/passwordReset');
 const Employee = require('../models/employee');
 const Company = require('../models/company');

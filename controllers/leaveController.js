@@ -2,7 +2,7 @@
 const LeaveRequest = require('../models/leaveRequest');
 const LeaveEntitlement = require('../models/leaveEntitlement');
 const LeavePolicy = require('../models/leavePolicy');
-const EmployeesAttendance = require('../models/EmployeesAttendance');
+const EmployeesAttendance = require('../models/employeesAttendance');
 const Employee = require('../models/employee');
 const moment = require('moment-timezone');
 
