@@ -52,41 +52,108 @@ exports.login = async (req, res) => {
   }
 };
 
+// exports.acceptInvitation = async (req, res) => {
+//   try {
+//     const { token, newPassword } = req.body;
+//     console.log('acceptInvitation - Request body:', { token });
+//     const invitation = await Invitation.findOne({ token, accepted: false });
+//     if (!invitation || moment().isAfter(invitation.expiresAt)) {
+//       console.log('acceptInvitation - Invalid or expired invitation:', token);
+//       await User.findOneAndUpdate(
+//         { email: invitation?.email, employeeId: invitation?.employeeId },
+//         { invitationStatus: 'expired' }
+//       );
+//       return res.status(400).json({ success: false, error: 'Invalid or expired invitation' });
+//     }
+//     const user = await User.findOne({ email: invitation.email, employeeId: invitation.employeeId });
+//     if (!user) {
+//       console.log('acceptInvitation - User not found for email:', invitation.email);
+//       return res.status(400).json({ success: false, error: 'User not found' });
+//     }
+//     user.password = newPassword;
+//     user.isActive = true;
+//     user.invitationStatus = 'accepted';
+//     user.invitationExpires = null;
+//     await user.save();
+//     invitation.accepted = true;
+//     await invitation.save();
+//     console.log('acceptInvitation - User updated:', user._id);
+//     const tokenJwt = jwt.sign(
+//       { id: user._id, email: user.email, role: user.role, employeeId: user.employeeId, companyId: user.companyId },
+//       process.env.JWT_SECRET || 'your_jwt_secret',
+//       { expiresIn: '1h' }
+//     );
+//     res.status(200).json({ success: true, token: tokenJwt });
+//   } catch (error) {
+//     console.error('acceptInvitation - Error:', error);
+//     res.status(400).json({ success: false, error: error.message });
+//   } finally {
+//     console.log('acceptInvitation - Execution completed');
+//   }
+// };
+
 exports.acceptInvitation = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
-    console.log('acceptInvitation - Request body:', { token });
+    console.log('acceptInvitation - Attempting to accept invitation with token:', token);
+
     const invitation = await Invitation.findOne({ token, accepted: false });
-    if (!invitation || moment().isAfter(invitation.expiresAt)) {
-      console.log('acceptInvitation - Invalid or expired invitation:', token);
-      await User.findOneAndUpdate(
-        { email: invitation?.email, employeeId: invitation?.employeeId },
-        { invitationStatus: 'expired' }
-      );
-      return res.status(400).json({ success: false, error: 'Invalid or expired invitation' });
+
+    // Case 1: Invitation token is not found in the database.
+    if (!invitation) {
+      console.log('acceptInvitation - Failure: Invitation token not found or already accepted.');
+      return res.status(400).json({ success: false, error: 'Invalid invitation link. It may have already been used.' });
     }
+
+    // Case 2: Invitation token is found, but it has expired.
+    if (moment().isAfter(invitation.expiresAt)) {
+      console.log('acceptInvitation - Failure: Invitation has expired. Token:', token);
+      
+      // Find the associated user and update their status to 'expired'.
+      // This ensures the frontend can prompt them to request a new link.
+      const user = await User.findOne({ email: invitation.email, employeeId: invitation.employeeId });
+      if (user) {
+        user.invitationStatus = 'expired';
+        await user.save();
+        console.log(`acceptInvitation - User status for ${user.email} set to 'expired'.`);
+      }
+      
+      return res.status(400).json({ success: false, error: 'This invitation link has expired. Please request a new one.' });
+    }
+
+    // Case 3: Invitation is valid and not expired. Proceed with setting the password.
     const user = await User.findOne({ email: invitation.email, employeeId: invitation.employeeId });
     if (!user) {
-      console.log('acceptInvitation - User not found for email:', invitation.email);
-      return res.status(400).json({ success: false, error: 'User not found' });
+      console.log('acceptInvitation - Error: User associated with invitation not found. Email:', invitation.email);
+      return res.status(400).json({ success: false, error: 'User not found for this invitation.' });
     }
+
+    // Basic password validation
+    if (!newPassword || newPassword.length < 8) {
+        return res.status(400).json({ success: false, error: 'Password must be at least 8 characters long.' });
+    }
+
     user.password = newPassword;
     user.isActive = true;
     user.invitationStatus = 'accepted';
-    user.invitationExpires = null;
+    user.invitationExpires = null; // Clear any expiration date
     await user.save();
+
     invitation.accepted = true;
     await invitation.save();
-    console.log('acceptInvitation - User updated:', user._id);
+
+    console.log('acceptInvitation - Success: User account activated for email:', user.email);
+
     const tokenJwt = jwt.sign(
       { id: user._id, email: user.email, role: user.role, employeeId: user.employeeId, companyId: user.companyId },
       process.env.JWT_SECRET || 'your_jwt_secret',
       { expiresIn: '1h' }
     );
     res.status(200).json({ success: true, token: tokenJwt });
+
   } catch (error) {
-    console.error('acceptInvitation - Error:', error);
-    res.status(400).json({ success: false, error: error.message });
+    console.error('acceptInvitation - Critical Error:', error);
+    res.status(500).json({ success: false, error: 'An internal server error occurred.' });
   } finally {
     console.log('acceptInvitation - Execution completed');
   }
@@ -235,6 +302,69 @@ exports.resendInvitation = async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   } finally {
     console.log('resendInvitation - Execution completed');
+  }
+};
+
+exports.forceResendInvitation = async (req, res) => {
+  try {
+    const { email } = req.body;
+    console.log('forceResendInvitation - Admin request for email:', email);
+
+    // Ensure only an admin can perform this action
+    if (!['Super Admin', 'HR Manager', 'Company Admin'].includes(req.user.role)) {
+        return res.status(403).json({ success: false, error: 'Forbidden: You do not have permission to perform this action.' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      console.log('forceResendInvitation - User not found for email:', email);
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    console.log(`forceResendInvitation - Forcing resend for user ${user.email} with current status: ${user.invitationStatus}`);
+
+    // Invalidate previous invitations for this email to avoid confusion
+    await Invitation.updateMany({ email: user.email }, { $set: { accepted: true, expiresAt: new Date() } });
+
+    const temporaryPassword = crypto.randomBytes(8).toString('hex');
+    const invitationToken = crypto.randomBytes(32).toString('hex');
+    const invitationExpires = moment().add(3, 'days').toDate();
+
+    const newInvitation = new Invitation({
+      companyId: user.companyId,
+      email: user.email,
+      employeeId: user.employeeId,
+      token: invitationToken,
+      temporaryPassword,
+      expiresAt: invitationExpires,
+    });
+    await newInvitation.save();
+
+    user.password = temporaryPassword; // Set a new temporary password
+    user.invitationStatus = 'sent'; // Reset the status to 'sent'
+    user.invitationExpires = invitationExpires;
+    user.isActive = false; // Deactivate user until they accept the new invitation
+    await user.save();
+
+    const invitationLink = `${process.env.FRONTEND_URL}/accept-invitation?token=${invitationToken}`;
+    
+    await transporter.sendMail({
+      from: process.env.ZOHO_EMAIL,
+      to: user.email,
+      subject: 'HRMS Invitation (New)',
+      html: `A new invitation has been generated for you. Your new temporary password is: <b>${temporaryPassword}</b><br>
+             Please accept the invitation by clicking this link: <a href="${invitationLink}">Accept Invitation</a><br>
+             This link expires on ${moment(invitationExpires).format('YYYY-MM-DD')}.`
+    });
+
+    console.log('forceResendInvitation - New invitation successfully sent to:', user.email);
+    res.status(200).json({ success: true, message: 'A new invitation has been forcefully resent.' });
+
+  } catch (error) {
+    console.error('forceResendInvitation - Error:', error);
+    res.status(500).json({ success: false, error: 'An internal server error occurred.' });
+  } finally {
+    console.log('forceResendInvitation - Execution completed');
   }
 };
 
