@@ -3,52 +3,121 @@ const Employee = require('../models/employee');
 const Company = require('../models/company');
 
 // Create a new shift
+
+// exports.createShift = async (req, res) => {
+//   console.log('createShift req.body', req.body);
+//   try {
+//     const { name, startTime, endTime, gracePeriod, overtimeThreshold,companyId } = req.body;
+//     // const companyId = req.user.companyId; // Assuming companyId is available from authenticated user
+
+//     // Verify company exists
+//     const company = await Company.findById(companyId);
+//     if (!company) {
+//       return res.status(404).json({ success: false, error: 'Company not found.' });
+//     }
+
+//     // Check for existing shift with the same time
+//     const existingShift = await Shift.findOne({ companyId, startTime, endTime });
+//     if (existingShift) {
+//       return res.status(400).json({ success: false, error: 'A shift with these start and end times already exists for this company.' });
+//     }
+
+//     // Calculate working hours
+//     const [startHour, startMinute] = startTime.split(':').map(Number);
+//     const [endHour, endMinute] = endTime.split(':').map(Number);
+
+//     let totalMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+//     if (totalMinutes < 0) {
+//       totalMinutes += 24 * 60; // Handle shifts crossing midnight
+//     }
+//     const workingHours = parseFloat((totalMinutes / 60).toFixed(2));
+//     console.log('createShift workingHours', workingHours);
+
+//     const newShift = new Shift({
+//       companyId,
+//       name,
+//       startTime,
+//       endTime,
+//       gracePeriod: gracePeriod || 0,
+//       overtimeThreshold: overtimeThreshold || 0,
+//       workingHours
+//     });
+
+//     await newShift.save();
+//     res.status(201).json({ success: true, data: newShift });
+//   } catch (error) {
+//     if (error.code === 11000) {
+//       return res.status(400).json({ success: false, error: 'Shift with this name already exists for the company.' });
+//     }
+//   res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
+
+// Create a new shift
 exports.createShift = async (req, res) => {
   console.log('createShift req.body', req.body);
   try {
-    const { name, startTime, endTime, gracePeriod, overtimeThreshold,companyId } = req.body;
-    // const companyId = req.user.companyId; // Assuming companyId is available from authenticated user
+    const { name, startTime, endTime, gracePeriod, overtimeThreshold, companyId } = req.body;
 
-    // Verify company exists
+    // ---- 1. Validate required fields ----
+    if (!name || !startTime || !endTime || !companyId) {
+      return res.status(400).json({ success: false, error: 'name, startTime, endTime and companyId are required.' });
+    }
+
+    // ---- 2. Verify company exists ----
     const company = await Company.findById(companyId);
     if (!company) {
       return res.status(404).json({ success: false, error: 'Company not found.' });
     }
 
-    // Check for existing shift with the same time
+    // ---- 3. Check for duplicate shift (same start & end) ----
     const existingShift = await Shift.findOne({ companyId, startTime, endTime });
     if (existingShift) {
       return res.status(400).json({ success: false, error: 'A shift with these start and end times already exists for this company.' });
     }
 
-    // Calculate working hours
+    // ---- 4. Parse times ----
     const [startHour, startMinute] = startTime.split(':').map(Number);
-    const [endHour, endMinute] = endTime.split(':').map(Number);
+    const [endHour,   endMinute]   = endTime.split(':').map(Number);
 
-    let totalMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
-    if (totalMinutes < 0) {
-      totalMinutes += 24 * 60; // Handle shifts crossing midnight
+    // Validate that the split produced numbers
+    if (isNaN(startHour) || isNaN(startMinute) || isNaN(endHour) || isNaN(endMinute)) {
+      return res.status(400).json({ success: false, error: 'Invalid time format. Use HH:MM (24-hour).' });
     }
+
+    // ---- 5. Calculate working hours (with midnight-crossing fix) ----
+    let totalMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+
+    // **THIS IS THE LINE YOU ASKED FOR**
+    if (totalMinutes <= 0) totalMinutes += 24 * 60;   // <= 0 instead of < 0
+
     const workingHours = parseFloat((totalMinutes / 60).toFixed(2));
     console.log('createShift workingHours', workingHours);
 
+    // ---- 6. Create the shift document ----
     const newShift = new Shift({
       companyId,
       name,
       startTime,
       endTime,
-      gracePeriod: gracePeriod || 0,
-      overtimeThreshold: overtimeThreshold || 0,
+      gracePeriod: gracePeriod ?? 0,          // default 0 if not sent
+      overtimeThreshold: overtimeThreshold ?? 0,
       workingHours
     });
 
     await newShift.save();
+
     res.status(201).json({ success: true, data: newShift });
   } catch (error) {
+    console.error('createShift error:', error);
+
+    // Duplicate name (unique index on name + companyId)
     if (error.code === 11000) {
       return res.status(400).json({ success: false, error: 'Shift with this name already exists for the company.' });
     }
-  res.status(400).json({ success: false, error: error.message });
+
+    res.status(400).json({ success: false, error: error.message });
   }
 };
 
@@ -87,12 +156,77 @@ exports.getShiftById = async (req, res) => {
 };
 
 // Update a shift
+
+// exports.updateShift = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { startTime, endTime, gracePeriod, overtimeThreshold } = req.body;
+
+//     // Find the original shift to get its companyId
+//     const originalShift = await Shift.findById(id);
+//     if (!originalShift) {
+//       return res.status(404).json({ success: false, error: 'Shift not found.' });
+//     }
+
+//     const updateData = {};
+
+//     if (startTime) updateData.startTime = startTime;
+//     if (endTime) updateData.endTime = endTime;
+//     if (gracePeriod !== undefined) updateData.gracePeriod = gracePeriod;
+//     if (overtimeThreshold !== undefined) updateData.overtimeThreshold = overtimeThreshold;
+
+//     // Check for existing shift with the same time
+//     if (startTime && endTime) {
+//       const existingShift = await Shift.findOne({
+//         _id: { $ne: id },
+//         companyId: originalShift.companyId,
+//         startTime,
+//         endTime
+//       });
+//       if (existingShift) {
+//         return res.status(400).json({ success: false, error: 'Another shift with these start and end times already exists for this company.' });
+//       }
+//     }
+
+//     // Calculate working hours if startTime or endTime are provided
+//     if (startTime && endTime) {
+//       const [startHour, startMinute] = startTime.split(':').map(Number);
+//       const [endHour, endMinute] = endTime.split(':').map(Number);
+
+//       let totalMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+//       if (totalMinutes < 0) {
+//         totalMinutes += 24 * 60; // Handle shifts crossing midnight
+//       }
+//       updateData.workingHours = parseFloat((totalMinutes / 60).toFixed(2));
+//     } else if (startTime || endTime) {
+//         return res.status(400).json({ success: false, error: 'Both startTime and endTime must be provided to recalculate working hours.' });
+//     }
+
+//     const updatedShift = await Shift.findByIdAndUpdate(
+//       id,
+//       { $set: updateData },
+//       { new: true, runValidators: true }
+//     );
+
+//     if (!updatedShift) {
+//       return res.status(404).json({ success: false, error: 'Shift not found.' });
+//     }
+//     res.status(200).json({ success: true, data: updatedShift });
+//   } catch (error) {
+//     if (error.code === 11000) {
+//       return res.status(400).json({ success: false, error: 'Shift with this name already exists for the company.' });
+//     }
+//     res.status(400).json({ success: false, error: error });
+//   }
+// };
+
+// Update a shift
 exports.updateShift = async (req, res) => {
   try {
     const { id } = req.params;
-    const { startTime, endTime, gracePeriod, overtimeThreshold } = req.body;
+    const { name, startTime, endTime, gracePeriod, overtimeThreshold } = req.body;
 
-    // Find the original shift to get its companyId
+    // ---- 1. Find original shift (to get companyId) ----
     const originalShift = await Shift.findById(id);
     if (!originalShift) {
       return res.status(404).json({ success: false, error: 'Shift not found.' });
@@ -100,38 +234,47 @@ exports.updateShift = async (req, res) => {
 
     const updateData = {};
 
-    if (startTime) updateData.startTime = startTime;
-    if (endTime) updateData.endTime = endTime;
+    // ---- 2. Only update fields that are provided ----
+    if (name !== undefined) updateData.name = name;
     if (gracePeriod !== undefined) updateData.gracePeriod = gracePeriod;
     if (overtimeThreshold !== undefined) updateData.overtimeThreshold = overtimeThreshold;
 
-    // Check for existing shift with the same time
+    // ---- 3. Handle startTime & endTime together (required for workingHours) ----
     if (startTime && endTime) {
-      const existingShift = await Shift.findOne({
+      // Validate format
+      const [sh, sm] = startTime.split(':').map(Number);
+      const [eh, em] = endTime.split(':').map(Number);
+      if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) {
+        return res.status(400).json({ success: false, error: 'Invalid time format. Use HH:MM.' });
+      }
+
+      // Check for duplicate (exclude current shift)
+      const existing = await Shift.findOne({
         _id: { $ne: id },
         companyId: originalShift.companyId,
         startTime,
         endTime
       });
-      if (existingShift) {
-        return res.status(400).json({ success: false, error: 'Another shift with these start and end times already exists for this company.' });
+      if (existing) {
+        return res.status(400).json({ success: false, error: 'Another shift with these times already exists.' });
       }
-    }
 
-    // Calculate working hours if startTime or endTime are provided
-    if (startTime && endTime) {
-      const [startHour, startMinute] = startTime.split(':').map(Number);
-      const [endHour, endMinute] = endTime.split(':').map(Number);
+      // ---- 4. Recalculate workingHours (with <= 0 fix) ----
+      let totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
+      if (totalMinutes <= 0) totalMinutes += 24 * 60;  // <= 0 FIX
 
-      let totalMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
-      if (totalMinutes < 0) {
-        totalMinutes += 24 * 60; // Handle shifts crossing midnight
-      }
-      updateData.workingHours = parseFloat((totalMinutes / 60).toFixed(2));
+      const workingHours = parseFloat((totalMinutes / 60).toFixed(2));
+
+      updateData.startTime = startTime;
+      updateData.endTime = endTime;
+      updateData.workingHours = workingHours;
+
     } else if (startTime || endTime) {
-        return res.status(400).json({ success: false, error: 'Both startTime and endTime must be provided to recalculate working hours.' });
+      // If only one is sent → error
+      return res.status(400).json({ success: false, error: 'Both startTime and endTime must be provided to update shift times.' });
     }
 
+    // ---- 5. Update the shift ----
     const updatedShift = await Shift.findByIdAndUpdate(
       id,
       { $set: updateData },
@@ -141,12 +284,14 @@ exports.updateShift = async (req, res) => {
     if (!updatedShift) {
       return res.status(404).json({ success: false, error: 'Shift not found.' });
     }
+
     res.status(200).json({ success: true, data: updatedShift });
   } catch (error) {
+    console.error('updateShift error:', error);
     if (error.code === 11000) {
       return res.status(400).json({ success: false, error: 'Shift with this name already exists for the company.' });
     }
-    res.status(400).json({ success: false, error: error });
+    res.status(400).json({ success: false, error: error.message });
   }
 };
 
