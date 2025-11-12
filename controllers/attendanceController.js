@@ -27,13 +27,14 @@ exports.getAttendance = async (req, res) => {
     }
 
     const attendance = await EmployeesAttendance.find(query)
-      .populate('employeeId', 'newEmployeeCode fullName')
+      .populate('employeeId', 'newEmployeeCode fullName deviceUserId')
       .sort({ date: 1, employeeId: 1 });
 
     const result = attendance.map(record => ({
       employeeId: record.employeeId._id,
       employeeCode: record.employeeId.newEmployeeCode,
       fullName: record.employeeId.fullName,
+      deviceUserId: record.employeeId.deviceUserId,
       date: moment(record.date).tz('Asia/Dhaka').format('YYYY-MM-DD'),
       check_in: record.check_in ? moment(record.check_in).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss') : null,
       check_out: record.check_out ? moment(record.check_out).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss') : null,
@@ -134,12 +135,12 @@ exports.getEmployeeAttendance = async (req, res) => {
     let { startDate, endDate, employeeId } = req.query;
 
     // Default to current month
-    const now = new Date();
-    const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const defaultEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const now = moment.tz('Asia/Dhaka');
+    const defaultStart = now.clone().startOf('month').toDate();
+    const defaultEnd = now.clone().endOf('month').toDate();
 
-    const start = startDate ? new Date(startDate) : defaultStart;
-    const end = endDate ? new Date(endDate) : defaultEnd;
+    const start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day').toDate() : defaultStart;
+    const end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day').toDate() : defaultEnd;
 
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return res.status(400).json({ success: false, error: 'Invalid date format' });
@@ -147,9 +148,6 @@ exports.getEmployeeAttendance = async (req, res) => {
     if (start > end) {
       return res.status(400).json({ success: false, error: 'startDate must be before endDate' });
     }
-
-    // Set end time to end of day
-    end.setHours(23, 59, 59, 999);
 
     const query = {
       date: { $gte: start, $lte: end }
@@ -160,7 +158,7 @@ exports.getEmployeeAttendance = async (req, res) => {
     }
 
     const attendance = await EmployeesAttendance.find(query)
-      .populate('employeeId', 'newEmployeeCode fullName')
+      .populate('employeeId', 'newEmployeeCode fullName deviceUserId')
       .sort({ date: 1, employeeId: 1 });
 
     const result = attendance.map(record => {
@@ -172,6 +170,7 @@ exports.getEmployeeAttendance = async (req, res) => {
         employeeId: record.employeeId._id,
         employeeCode: record.employeeId.newEmployeeCode,
         fullName: record.employeeId.fullName,
+        deviceUserId: record.employeeId.deviceUserId,
         date: moment(record.date).tz('Asia/Dhaka').format('YYYY-MM-DD'),
         check_in: record.check_in ? moment(record.check_in).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss') : null,
         check_out: record.check_out ? moment(record.check_out).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss') : null,
