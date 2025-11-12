@@ -8,7 +8,13 @@ const employeesAttendanceSchema = new mongoose.Schema({
   check_out: { type: Date },
   work_hours: { type: Number },
   status: { type: String, enum: ['Present', 'Incomplete', 'Absent', 'Weekend', 'Leave', 'Holiday', 'Remote'], required: true },
-  leave_type: { type: String, enum: ['sick', 'casual', 'annual', 'maternity', 'paternity', 'bereavement', null] }
+  leave_type: { type: String, enum: ['sick', 'casual', 'annual', 'maternity', 'paternity', 'bereavement', null] },
+  isLate: { type: Boolean, default: false },
+  lateBy: { type: Number, default: 0 }, // in minutes
+  isEarlyDeparture: { type: Boolean, default: false },
+  earlyDepartureBy: { type: Number, default: 0 }, // in minutes
+  isOvertime: { type: Boolean, default: false },
+  overtimeHours: { type: Number, default: 0 } // in hours
 }, { timestamps: true, indexes: [{ key: { employeeId: 1, date: 1 }, unique: true }] });
 
 // module.exports = mongoose.model('EmployeesAttendance', employeesAttendanceSchema);

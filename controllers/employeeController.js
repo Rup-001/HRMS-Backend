@@ -43,6 +43,7 @@ exports.createEmployee = async (req, res) => {
       joiningDate,
       department,
       designation,
+      shiftId, // <-- Add shiftId here
       createUser = false,
       createDeviceUser = false,
     } = req.body;
@@ -117,6 +118,7 @@ exports.createEmployee = async (req, res) => {
           joiningDate,
           department,
           designation,
+          shiftId, // <-- Add shiftId here
           employeeStatus: 'active',
           passportSizePhoto: uploadedFiles.passportSizePhoto
             ? `/${uploadedFiles.passportSizePhoto}`
@@ -300,6 +302,7 @@ exports.updateEmployee = async (req, res) => {
       joiningDate: req.body.joiningDate,
       department: req.body.department,
       designation: req.body.designation,
+      shiftId: req.body.shiftId, // <-- Add shiftId here
       employeeStatus: req.body.employeeStatus,
       managerId: req.body.managerId,
       personalPhoneNumber: req.body.personalPhoneNumber,
@@ -497,6 +500,8 @@ exports.getEmployees = async (req, res) => {
           joiningDate: 1,
           department: 1,
           designation: 1,
+          shiftId: 1,
+          shift: 1,
           employeeStatus: 1,
           passportSizePhoto: 1,
           appointmentLetter: 1,
@@ -531,6 +536,20 @@ exports.getEmployees = async (req, res) => {
       {
         $unwind: {
           path: '$designation',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $lookup: {
+          from: 'shifts',
+          localField: 'shiftId',
+          foreignField: '_id',
+          as: 'shift'
+        }
+      },
+      {
+        $unwind: {
+          path: '$shift',
           preserveNullAndEmptyArrays: true
         }
       }

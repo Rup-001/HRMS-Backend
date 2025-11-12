@@ -7,6 +7,7 @@ const dashboardRoutes = require('./dashboardRoutes');
 const attendanceRoutes = require('./attendanceRoutes');
 const leaveRoutes = require('./leaveRoutes');
 const payslipRoutes = require('./payslipRoutes');
+const shiftRoutes = require('./shiftRoutes');
 const holidayRoutes = require('./holidayRoutes');
 const deviceLogsRoutes = require('./deviceLogsRoutes')
 const companyRoutes = require('./companyRoutes')
@@ -37,7 +38,8 @@ router.use('/deviceLogs', deviceLogsRoutes);
 router.use('/dashboard',  dashboardRoutes);
 router.use('/attendance', passport.authenticate('jwt', { session: false }), attendanceRoutes);
 router.use('/leave', passport.authenticate('jwt', { session: false }), leaveRoutes);
-router.use('/payslips', passport.authenticate('jwt', { session: false }), payslipRoutes);
+router.use('/payslips', payslipRoutes);
+router.use('/shifts', shiftRoutes);
 router.use('/holidays', passport.authenticate('jwt', { session: false }), holidayRoutes);
 router.use('/company', passport.authenticate('jwt', { session: false }), companyRoutes);
 router.use('/document', passport.authenticate('jwt', { session: false }), documentRoutes);

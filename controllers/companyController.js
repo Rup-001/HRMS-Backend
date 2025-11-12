@@ -44,7 +44,7 @@ exports.createCompany = async (req, res) => {
 
 exports.getCompanies = async (req, res) => {
   try {
-    const companies = await Company.find({ isActive: true });
+    const companies = await Company.find({});
     console.log('getCompanies - Retrieved companies:', companies.map(c => ({
       _id: c._id,
       name: c.name,

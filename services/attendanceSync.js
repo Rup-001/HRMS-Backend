@@ -4,19 +4,20 @@ const EmployeesAttendance = require('../models/EmployeesAttendance');
 const LeaveRequest = require('../models/leaveRequest');
 const Holiday = require('../models/holiday');
 const Log = require('../models/log');
+const Shift = require('../models/shift');
 
 async function syncAttendance(companyId, startDate, endDate) {
   try {
     const start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day') : moment.tz('2025-09-01', 'Asia/Dhaka').startOf('day');
     const end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day') : moment.tz('2025-09-30', 'Asia/Dhaka').endOf('day');
 
-    const employees = await Employee.find({ companyId, deviceUserId: { $ne: null } });
+    const employees = await Employee.find({ companyId, deviceUserId: { $ne: null } }).populate('shiftId');
     const logs = await Log.find({ companyId, record_time: { $gte: start.toDate(), $lte: end.toDate() } });
     const holidays = await Holiday.find({ $or: [{ companyId }, { isNational: true }], date: { $gte: start.toDate(), $lte: end.toDate() } });
     const leaveRequests = await LeaveRequest.find({ companyId, status: 'approved', startDate: { $lte: end.toDate() }, endDate: { $gte: start.toDate() } });
 
     const userToEmployeeMap = {};
-    employees.forEach(emp => userToEmployeeMap[emp.deviceUserId] = emp._id);
+    employees.forEach(emp => userToEmployeeMap[emp.deviceUserId] = emp);
 
     const attendanceByEmployee = {};
     for (const log of logs) {
@@ -25,16 +26,16 @@ async function syncAttendance(companyId, startDate, endDate) {
       let windowStart = logTime.hour() < 6 ? logTime.clone().subtract(1, 'day').set({ hour: 6, minute: 0, second: 0, millisecond: 0 }) : 
                        logTime.clone().set({ hour: 6, minute: 0, second: 0, millisecond: 0 });
       const windowKey = windowStart.format('YYYY-MM-DD');
-      const employeeId = userToEmployeeMap[log.user_id];
-      if (!employeeId) continue;
+      const employee = userToEmployeeMap[log.user_id];
+      if (!employee) continue;
 
-      if (!attendanceByEmployee[employeeId]) {
-        attendanceByEmployee[employeeId] = {};
+      if (!attendanceByEmployee[employee._id]) {
+        attendanceByEmployee[employee._id] = {};
       }
-      if (!attendanceByEmployee[employeeId][windowKey]) {
-        attendanceByEmployee[employeeId][windowKey] = [];
+      if (!attendanceByEmployee[employee._id][windowKey]) {
+        attendanceByEmployee[employee._id][windowKey] = [];
       }
-      attendanceByEmployee[employeeId][windowKey].push(logTime);
+      attendanceByEmployee[employee._id][windowKey].push(logTime);
     }
 
     const attendanceRecords = [];
@@ -51,6 +52,12 @@ async function syncAttendance(companyId, startDate, endDate) {
         let check_out = null;
         let work_hours = null;
         let leave_type = null;
+        let isLate = false;
+        let lateBy = 0;
+        let isEarlyDeparture = false;
+        let earlyDepartureBy = 0;
+        let isOvertime = false;
+        let overtimeHours = 0;
 
         const leave = leaveRequests.find(lr => lr.employeeId.equals(employee._id) && windowStart.isBetween(lr.startDate, lr.endDate, 'day', '[]'));
         if (leave) {
@@ -63,6 +70,35 @@ async function syncAttendance(companyId, startDate, endDate) {
           status = check_out ? 'Present' : 'Incomplete';
           if (check_out) {
             work_hours = moment(check_out).diff(check_in, 'hours', true);
+
+            if (employee.shiftId) {
+              const shift = employee.shiftId;
+              const [shiftStartHour, shiftStartMinute] = shift.startTime.split(':').map(Number);
+              const [shiftEndHour, shiftEndMinute] = shift.endTime.split(':').map(Number);
+
+              let scheduledShiftStart = moment(windowStart).set({ hour: shiftStartHour, minute: shiftStartMinute, second: 0, millisecond: 0 });
+              let scheduledShiftEnd = moment(windowStart).set({ hour: shiftEndHour, minute: shiftEndMinute, second: 0, millisecond: 0 });
+
+              if (scheduledShiftEnd.isBefore(scheduledShiftStart)) {
+                scheduledShiftEnd.add(1, 'day');
+              }
+
+              if (moment(check_in).isAfter(scheduledShiftStart.clone().add(shift.gracePeriod, 'minutes'))) {
+                isLate = true;
+                lateBy = moment(check_in).diff(scheduledShiftStart, 'minutes');
+              }
+
+              if (moment(check_out).isBefore(scheduledShiftEnd)) {
+                isEarlyDeparture = true;
+                earlyDepartureBy = scheduledShiftEnd.diff(check_out, 'minutes');
+              }
+
+              if (work_hours > shift.workingHours) {
+                isOvertime = true;
+                overtimeHours = work_hours - shift.workingHours;
+                if (overtimeHours < 0) overtimeHours = 0;
+              }
+            }
           }
         }
 
@@ -74,7 +110,13 @@ async function syncAttendance(companyId, startDate, endDate) {
           check_out,
           work_hours,
           status,
-          leave_type
+          leave_type,
+          isLate,
+          lateBy,
+          isEarlyDeparture,
+          earlyDepartureBy,
+          isOvertime,
+          overtimeHours
         });
       }
       dateIterator.add(1, 'day');

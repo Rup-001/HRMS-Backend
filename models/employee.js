@@ -43,6 +43,7 @@ deviceUid: { type: Number, unique: true, sparse: true },
   nidCopy: { type: String },
   passportSizePhoto: { type: String },
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
+  shiftId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shift', default: null },
   hasUserAccount: { type: Boolean, default: false }
 }, { timestamps: true },
 
