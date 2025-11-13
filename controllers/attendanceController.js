@@ -614,10 +614,6 @@ exports.getAttendance = async (req, res) => {
 //   }
 // };
 
-
-const moment = require('moment-timezone');
-const EmployeesAttendance = require('../models/employeesAttendance'); // Adjust path if needed
-
 exports.getEmployeeAttendance = async (req, res) => {
   try {
     let { startDate, endDate, employeeId } = req.query;
