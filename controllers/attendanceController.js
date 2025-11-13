@@ -648,7 +648,6 @@ exports.getEmployeeAttendance = async (req, res) => {
       .sort({ date: 1 })
       .lean();
 
-    // Fetch all employees if no specific employeeId
     let allEmployees = [];
     if (!employeeId) {
       const Employee = require('../models/employee');
@@ -664,27 +663,24 @@ exports.getEmployeeAttendance = async (req, res) => {
     const dateMap = new Map();
     let current = moment.tz(start, 'Asia/Dhaka').startOf('day');
     const endMoment = moment.tz(end, 'Asia/Dhaka').endOf('day');
-
     while (current <= endMoment) {
       dateMap.set(current.format('YYYY-MM-DD'), null);
       current.add(1, 'day');
     }
 
-    // Convert time string "09:00" → minutes
     const timeToMinutes = (timeStr) => {
       if (!timeStr) return null;
       const [h, m] = timeStr.split(':').map(Number);
       return h * 60 + m;
     };
 
-    // Convert ISO date → minutes in Asia/Dhaka
+    // FIXED: Device saves local time as UTC → subtract 6 hours
     const dateToMinutes = (date) => {
       if (!date) return null;
-      const m = moment.tz(date, 'Asia/Dhaka');
-      return m.hour() * 60 + m.minute();
+      const localTime = moment.utc(date).subtract(6, 'hours');
+      return localTime.hour() * 60 + localTime.minute();
     };
 
-    // Format minutes → "7.04 hr" or "45 mins"
     const formatMinutes = (mins) => {
       if (!mins || mins <= 0) return '0 mins';
       if (mins < 60) return `${mins} mins`;
@@ -693,7 +689,6 @@ exports.getEmployeeAttendance = async (req, res) => {
       return `${h}.${m.toString().padStart(2, '0')} hr`;
     };
 
-    // Process existing attendance records
     for (const rec of attendanceRecords) {
       const emp = rec.employeeId;
       if (!emp) continue;
@@ -722,27 +717,24 @@ exports.getEmployeeAttendance = async (req, res) => {
       let earlyMins = 0;
       let otMins = 0;
 
-      // Late: after grace period
+      // Late after grace
       if (inMins !== null && shiftStart !== null) {
         const lateThreshold = shiftStart + grace;
         if (inMins > lateThreshold) {
-          lateMins = inMins - lateThreshold;  // After 09:10
+          lateMins = inMins - lateThreshold;
         }
       }
 
-      // Early departure
       if (outMins !== null && shiftEnd !== null && outMins < shiftEnd) {
         earlyMins = shiftEnd - outMins;
       }
 
-      // Work minutes
       let workMins = 0;
       if (inMins !== null && outMins !== null) {
         workMins = outMins - inMins;
-        if (workMins <= 0) workMins += 24 * 60; // overnight
+        if (workMins <= 0) workMins += 24 * 60;
       }
 
-      // Overtime: after expected + threshold
       const otStart = expectedMins + otThreshold;
       if (workMins > otStart) {
         otMins = workMins - otStart;
@@ -754,8 +746,13 @@ exports.getEmployeeAttendance = async (req, res) => {
         fullName: emp.fullName,
         deviceUserId: emp.deviceUserId,
         date: dateStr,
-        check_in: rec.check_in ? rec.check_in.toISOString() : null,
-        check_out: rec.check_out ? rec.check_out.toISOString() : null,
+        // Show real local time
+        check_in: rec.check_in 
+          ? moment.utc(rec.check_in).subtract(6, 'hours').format('YYYY-MM-DD HH:mm:ss')
+          : null,
+        check_out: rec.check_out 
+          ? moment.utc(rec.check_out).subtract(6, 'hours').format('YYYY-MM-DD HH:mm:ss')
+          : null,
         work_hours: rec.work_hours ? Number(rec.work_hours.toFixed(2)) : 0,
         status: rec.status || 'Present',
         leave_type: rec.leave_type,
@@ -776,7 +773,6 @@ exports.getEmployeeAttendance = async (req, res) => {
       });
     }
 
-    // Fill missing dates
     const result = [];
     for (const [date, record] of dateMap) {
       if (record) {
@@ -805,7 +801,6 @@ exports.getEmployeeAttendance = async (req, res) => {
       }
     }
 
-    // Helper: create absent record
     function createAbsentRecord(emp, date, shift) {
       return {
         employeeId: emp._id,
