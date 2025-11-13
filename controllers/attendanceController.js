@@ -648,7 +648,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       .sort({ date: 1 })
       .lean();
 
-    // === FETCH ALL EMPLOYEES IF NO SPECIFIC employeeId ===
+    // Fetch all employees if no specific employeeId
     let allEmployees = [];
     if (!employeeId) {
       const Employee = require('../models/employee');
@@ -670,18 +670,21 @@ exports.getEmployeeAttendance = async (req, res) => {
       current.add(1, 'day');
     }
 
+    // Convert time string "09:00" → minutes
     const timeToMinutes = (timeStr) => {
       if (!timeStr) return null;
       const [h, m] = timeStr.split(':').map(Number);
       return h * 60 + m;
     };
 
-    // ✅ FIXED: Use Dhaka timezone (like old controller)
+    // Convert ISO date → minutes in Asia/Dhaka
     const dateToMinutes = (date) => {
       if (!date) return null;
-      return moment.tz(date, 'Asia/Dhaka').hour() * 60 + moment.tz(date, 'Asia/Dhaka').minute();
+      const m = moment.tz(date, 'Asia/Dhaka');
+      return m.hour() * 60 + m.minute();
     };
 
+    // Format minutes → "7.04 hr" or "45 mins"
     const formatMinutes = (mins) => {
       if (!mins || mins <= 0) return '0 mins';
       if (mins < 60) return `${mins} mins`;
@@ -690,7 +693,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       return `${h}.${m.toString().padStart(2, '0')} hr`;
     };
 
-    // === PROCESS EXISTING RECORDS ===
+    // Process existing attendance records
     for (const rec of attendanceRecords) {
       const emp = rec.employeeId;
       if (!emp) continue;
@@ -710,7 +713,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       const shiftEnd = timeToMinutes(shift.endTime);
       const grace = shift.gracePeriod || 0;
       const otThreshold = shift.overtimeThreshold || 0;
-      const expectedMins = shift.workingHours * 60;
+      const expectedMins = (shift.workingHours || 0) * 60;
 
       const inMins = rec.check_in ? dateToMinutes(rec.check_in) : null;
       const outMins = rec.check_out ? dateToMinutes(rec.check_out) : null;
@@ -719,25 +722,30 @@ exports.getEmployeeAttendance = async (req, res) => {
       let earlyMins = 0;
       let otMins = 0;
 
+      // Late: after grace period
       if (inMins !== null && shiftStart !== null) {
         const lateThreshold = shiftStart + grace;
         if (inMins > lateThreshold) {
-          lateMins = inMins - shiftStart;
+          lateMins = inMins - lateThreshold;  // After 09:10
         }
       }
 
+      // Early departure
       if (outMins !== null && shiftEnd !== null && outMins < shiftEnd) {
         earlyMins = shiftEnd - outMins;
       }
 
+      // Work minutes
       let workMins = 0;
       if (inMins !== null && outMins !== null) {
         workMins = outMins - inMins;
-        if (workMins <= 0) workMins += 24 * 60;
+        if (workMins <= 0) workMins += 24 * 60; // overnight
       }
 
-      if (workMins > expectedMins + otThreshold) {
-        otMins = workMins - expectedMins;
+      // Overtime: after expected + threshold
+      const otStart = expectedMins + otThreshold;
+      if (workMins > otStart) {
+        otMins = workMins - otStart;
       }
 
       dateMap.set(dateStr, {
@@ -746,7 +754,6 @@ exports.getEmployeeAttendance = async (req, res) => {
         fullName: emp.fullName,
         deviceUserId: emp.deviceUserId,
         date: dateStr,
-        // ✅ Keep ISO for frontend (frontend will format as UTC)
         check_in: rec.check_in ? rec.check_in.toISOString() : null,
         check_out: rec.check_out ? rec.check_out.toISOString() : null,
         work_hours: rec.work_hours ? Number(rec.work_hours.toFixed(2)) : 0,
@@ -769,16 +776,14 @@ exports.getEmployeeAttendance = async (req, res) => {
       });
     }
 
-    // === FILL MISSING DATES ===
+    // Fill missing dates
     const result = [];
-
     for (const [date, record] of dateMap) {
       if (record) {
         result.push(record);
         continue;
       }
 
-      // === CASE 1: Specific Employee ===
       if (employeeId) {
         let emp = attendanceRecords[0]?.employeeId;
         if (!emp) {
@@ -790,63 +795,42 @@ exports.getEmployeeAttendance = async (req, res) => {
         }
         if (emp) {
           const shift = emp.shiftId || { name: 'No Shift', startTime: '00:00', endTime: '00:00', workingHours: 0 };
-          result.push({
-            employeeId: emp._id,
-            employeeCode: emp.newEmployeeCode,
-            fullName: emp.fullName,
-            deviceUserId: emp.deviceUserId,
-            date,
-            check_in: null,
-            check_out: null,
-            work_hours: 0,
-            status: 'Absent',
-            leave_type: null,
-            isLate: false,
-            lateBy: '0 mins',
-            isEarlyDeparture: false,
-            earlyDepartureBy: '0 mins',
-            isOvertime: false,
-            overtimeHours: '0 mins',
-            shift: {
-              name: shift.name,
-              startTime: shift.startTime,
-              endTime: shift.endTime,
-              workingHours: shift.workingHours
-            }
-          });
+          result.push(createAbsentRecord(emp, date, shift));
         }
-      }
-
-      // === CASE 2: All Employees ===
-      else {
+      } else {
         for (const emp of allEmployees) {
           const shift = emp.shiftId || { name: 'No Shift', startTime: '00:00', endTime: '00:00', workingHours: 0 };
-          result.push({
-            employeeId: emp._id,
-            employeeCode: emp.newEmployeeCode,
-            fullName: emp.fullName,
-            deviceUserId: emp.deviceUserId,
-            date,
-            check_in: null,
-            check_out: null,
-            work_hours: 0,
-            status: 'Absent',
-            leave_type: null,
-            isLate: false,
-            lateBy: '0 mins',
-            isEarlyDeparture: false,
-            earlyDepartureBy: '0 mins',
-            isOvertime: false,
-            overtimeHours: '0 mins',
-            shift: {
-              name: shift.name,
-              startTime: shift.startTime,
-              endTime: shift.endTime,
-              workingHours: shift.workingHours
-            }
-          });
+          result.push(createAbsentRecord(emp, date, shift));
         }
       }
+    }
+
+    // Helper: create absent record
+    function createAbsentRecord(emp, date, shift) {
+      return {
+        employeeId: emp._id,
+        employeeCode: emp.newEmployeeCode,
+        fullName: emp.fullName,
+        deviceUserId: emp.deviceUserId,
+        date,
+        check_in: null,
+        check_out: null,
+        work_hours: 0,
+        status: 'Absent',
+        leave_type: null,
+        isLate: false,
+        lateBy: '0 mins',
+        isEarlyDeparture: false,
+        earlyDepartureBy: '0 mins',
+        isOvertime: false,
+        overtimeHours: '0 mins',
+        shift: {
+          name: shift.name,
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          workingHours: shift.workingHours
+        }
+      };
     }
 
     res.status(200).json({ success: true, data: result });
