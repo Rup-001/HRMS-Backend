@@ -268,7 +268,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       const shiftStart = timeToMinutes(shift.startTime);
       const shiftEnd = timeToMinutes(shift.endTime);
       const grace = shift.gracePeriod || 0;
-      const otThreshold = (shift.overtimeThreshold || 0) * 60;
+      const otThreshold = shift.overtimeThreshold || 0;
       const expectedMins = shift.workingHours * 60;
 
       const inMins = rec.check_in ? dateToMinutes(rec.check_in) : null;
