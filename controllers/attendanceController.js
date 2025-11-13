@@ -615,6 +615,9 @@ exports.getAttendance = async (req, res) => {
 // };
 
 
+const moment = require('moment-timezone');
+const EmployeesAttendance = require('../models/employeesAttendance'); // Adjust path if needed
+
 exports.getEmployeeAttendance = async (req, res) => {
   try {
     let { startDate, endDate, employeeId } = req.query;
@@ -623,8 +626,12 @@ exports.getEmployeeAttendance = async (req, res) => {
     const defaultStart = now.clone().startOf('month').toDate();
     const defaultEnd = now.clone().endOf('month').toDate();
 
-    const start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day').toDate() : defaultStart;
-    const end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day').toDate() : defaultEnd;
+    const start = startDate
+      ? moment.tz(startDate, 'Asia/Dhaka').startOf('day').toDate()
+      : defaultStart;
+    const end = endDate
+      ? moment.tz(endDate, 'Asia/Dhaka').endOf('day').toDate()
+      : defaultEnd;
 
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return res.status(400).json({ success: false, error: 'Invalid date format' });
@@ -648,6 +655,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       .sort({ date: 1 })
       .lean();
 
+    // === FETCH ALL EMPLOYEES IF NO SPECIFIC employeeId ===
     let allEmployees = [];
     if (!employeeId) {
       const Employee = require('../models/employee');
@@ -663,6 +671,7 @@ exports.getEmployeeAttendance = async (req, res) => {
     const dateMap = new Map();
     let current = moment.tz(start, 'Asia/Dhaka').startOf('day');
     const endMoment = moment.tz(end, 'Asia/Dhaka').endOf('day');
+
     while (current <= endMoment) {
       dateMap.set(current.format('YYYY-MM-DD'), null);
       current.add(1, 'day');
@@ -674,11 +683,11 @@ exports.getEmployeeAttendance = async (req, res) => {
       return h * 60 + m;
     };
 
-    // FIXED: Device saves local time as UTC → subtract 6 hours
+    // USE UTC MINUTES FOR CALCULATION
     const dateToMinutes = (date) => {
       if (!date) return null;
-      const localTime = moment.utc(date).subtract(6, 'hours');
-      return localTime.hour() * 60 + localTime.minute();
+      const d = new Date(date);
+      return d.getUTCHours() * 60 + d.getUTCMinutes();
     };
 
     const formatMinutes = (mins) => {
@@ -689,6 +698,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       return `${h}.${m.toString().padStart(2, '0')} hr`;
     };
 
+    // === PROCESS EXISTING RECORDS ===
     for (const rec of attendanceRecords) {
       const emp = rec.employeeId;
       if (!emp) continue;
@@ -708,7 +718,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       const shiftEnd = timeToMinutes(shift.endTime);
       const grace = shift.gracePeriod || 0;
       const otThreshold = shift.overtimeThreshold || 0;
-      const expectedMins = (shift.workingHours || 0) * 60;
+      const expectedMins = shift.workingHours * 60;
 
       const inMins = rec.check_in ? dateToMinutes(rec.check_in) : null;
       const outMins = rec.check_out ? dateToMinutes(rec.check_out) : null;
@@ -717,11 +727,10 @@ exports.getEmployeeAttendance = async (req, res) => {
       let earlyMins = 0;
       let otMins = 0;
 
-      // Late after grace
       if (inMins !== null && shiftStart !== null) {
         const lateThreshold = shiftStart + grace;
         if (inMins > lateThreshold) {
-          lateMins = inMins - lateThreshold;
+          lateMins = inMins - shiftStart;
         }
       }
 
@@ -735,9 +744,8 @@ exports.getEmployeeAttendance = async (req, res) => {
         if (workMins <= 0) workMins += 24 * 60;
       }
 
-      const otStart = expectedMins + otThreshold;
-      if (workMins > otStart) {
-        otMins = workMins - otStart;
+      if (workMins > expectedMins + otThreshold) {
+        otMins = workMins - expectedMins;
       }
 
       dateMap.set(dateStr, {
@@ -746,13 +754,9 @@ exports.getEmployeeAttendance = async (req, res) => {
         fullName: emp.fullName,
         deviceUserId: emp.deviceUserId,
         date: dateStr,
-        // Show real local time
-        check_in: rec.check_in 
-          ? moment.utc(rec.check_in).subtract(6, 'hours').format('YYYY-MM-DD HH:mm:ss')
-          : null,
-        check_out: rec.check_out 
-          ? moment.utc(rec.check_out).subtract(6, 'hours').format('YYYY-MM-DD HH:mm:ss')
-          : null,
+        // UTC ISO FORMAT — NO LOCAL CONVERSION
+        check_in: rec.check_in ? rec.check_in.toISOString() : null,
+        check_out: rec.check_out ? rec.check_out.toISOString() : null,
         work_hours: rec.work_hours ? Number(rec.work_hours.toFixed(2)) : 0,
         status: rec.status || 'Present',
         leave_type: rec.leave_type,
@@ -773,59 +777,97 @@ exports.getEmployeeAttendance = async (req, res) => {
       });
     }
 
+    // === FILL MISSING DATES ===
     const result = [];
+
     for (const [date, record] of dateMap) {
       if (record) {
         result.push(record);
         continue;
       }
 
+      // === CASE 1: Specific Employee ===
       if (employeeId) {
         let emp = attendanceRecords[0]?.employeeId;
         if (!emp) {
           const Employee = require('../models/employee');
           emp = await Employee.findById(employeeId)
             .select('newEmployeeCode fullName deviceUserId shiftId')
-            .populate('shiftId', 'name startTime endTime workingHours')
+            .populate({
+              path: 'shiftId',
+              select: 'name startTime endTime gracePeriod overtimeThreshold workingHours'
+            })
             .lean();
         }
         if (emp) {
-          const shift = emp.shiftId || { name: 'No Shift', startTime: '00:00', endTime: '00:00', workingHours: 0 };
-          result.push(createAbsentRecord(emp, date, shift));
-        }
-      } else {
-        for (const emp of allEmployees) {
-          const shift = emp.shiftId || { name: 'No Shift', startTime: '00:00', endTime: '00:00', workingHours: 0 };
-          result.push(createAbsentRecord(emp, date, shift));
+          const shift = emp.shiftId || {
+            name: 'No Shift',
+            startTime: '00:00',
+            endTime: '00:00',
+            workingHours: 0
+          };
+          result.push({
+            employeeId: emp._id,
+            employeeCode: emp.newEmployeeCode,
+            fullName: emp.fullName,
+            deviceUserId: emp.deviceUserId,
+            date,
+            check_in: null,
+            check_out: null,
+            work_hours: 0,
+            status: 'Absent',
+            leave_type: null,
+            isLate: false,
+            lateBy: '0 mins',
+            isEarlyDeparture: false,
+            earlyDepartureBy: '0 mins',
+            isOvertime: false,
+            overtimeHours: '0 mins',
+            shift: {
+              name: shift.name,
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+              workingHours: shift.workingHours
+            }
+          });
         }
       }
-    }
 
-    function createAbsentRecord(emp, date, shift) {
-      return {
-        employeeId: emp._id,
-        employeeCode: emp.newEmployeeCode,
-        fullName: emp.fullName,
-        deviceUserId: emp.deviceUserId,
-        date,
-        check_in: null,
-        check_out: null,
-        work_hours: 0,
-        status: 'Absent',
-        leave_type: null,
-        isLate: false,
-        lateBy: '0 mins',
-        isEarlyDeparture: false,
-        earlyDepartureBy: '0 mins',
-        isOvertime: false,
-        overtimeHours: '0 mins',
-        shift: {
-          name: shift.name,
-          startTime: shift.startTime,
-          endTime: shift.endTime,
-          workingHours: shift.workingHours
+      // === CASE 2: All Employees ===
+      else {
+        for (const emp of allEmployees) {
+          const shift = emp.shiftId || {
+            name: 'No Shift',
+            startTime: '00:00',
+            endTime: '00:00',
+            workingHours: 0
+          };
+          result.push({
+            employeeId: emp._id,
+            employeeCode: emp.newEmployeeCode,
+            fullName: emp.fullName,
+            deviceUserId: emp.deviceUserId,
+            date,
+            check_in: null,
+            check_out: null,
+            work_hours: 0,
+            status: 'Absent',
+            leave_type: null,
+            isLate: false,
+            lateBy: '0 mins',
+            isEarlyDeparture: false,
+            earlyDepartureBy: '0 mins',
+            isOvertime: false,
+            overtimeHours: '0 mins',
+            shift: {
+              name: shift.name,
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+              workingHours: shift.workingHours
+            }
+          });
         }
-      };
+      }
     }
 
     res.status(200).json({ success: true, data: result });
@@ -834,6 +876,7 @@ exports.getEmployeeAttendance = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
 exports.createAdjustmentRequest = async (req, res) => {
   try {
     const { attendanceDate, proposedCheckIn, proposedCheckOut, reason } = req.body;
