@@ -7,10 +7,8 @@ const leaveEntitlementSchema = new mongoose.Schema({
   year: { type: Number, required: true },
   casual: { type: Number, default: 10 },
   sick: { type: Number, default: 14 },
-  earned: { type: Number, default: 20 },
+  annual: { type: Number, default: 20 },
   maternity: { type: Number, default: 0 },
-  paternity: { type: Number, default: 0 },
-  bereavement: { type: Number, default: 0 },
   festive: { type: Number, default: 0 }
 }, { timestamps: true });
 

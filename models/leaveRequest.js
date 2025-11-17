@@ -5,7 +5,7 @@ const leaveRequestSchema = new mongoose.Schema({
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
-  type: { type: String, enum: ['sick', 'casual', 'annual', 'maternity', 'paternity', 'bereavement', 'remote'], required: true },
+  type: { type: String, enum: ['casual', 'sick', 'festive', 'annual', 'maternity', 'remote'], required: true },
   status: { type: String, enum: ['pending', 'approved', 'denied'], default: 'pending' },
   approverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
   isHalfDay: { type: Boolean, default: false }
