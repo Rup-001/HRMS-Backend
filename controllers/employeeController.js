@@ -120,6 +120,9 @@ exports.createEmployee = async (req, res) => {
           designation,
           shiftId, // <-- Add shiftId here
           employeeStatus: 'active',
+          separationReason: req.body.separationReason || null,
+          separationRemarks: req.body.separationRemarks || null,
+          idCardReturned: req.body.idCardReturned || false,
           passportSizePhoto: uploadedFiles.passportSizePhoto
             ? `/${uploadedFiles.passportSizePhoto}`
             : undefined,
@@ -313,7 +316,10 @@ exports.updateEmployee = async (req, res) => {
       passportSizePhoto: uploadedFiles.passportSizePhoto ? `/${uploadedFiles.passportSizePhoto}` : employee.passportSizePhoto,
       appointmentLetter: uploadedFiles.appointmentLetter ? `/${uploadedFiles.appointmentLetter}` : employee.appointmentLetter,
       resume: uploadedFiles.resume ? `/${uploadedFiles.resume}` : employee.resume,
-      nidCopy: uploadedFiles.nidCopy ? `/${uploadedFiles.nidCopy}` : employee.nidCopy
+      nidCopy: uploadedFiles.nidCopy ? `/${uploadedFiles.nidCopy}` : employee.nidCopy,
+      separationReason: req.body.separationReason,
+      separationRemarks: req.body.separationRemarks,
+      idCardReturned: req.body.idCardReturned
     };
 
     delete req.body.newEmployeeCode;

@@ -1,21 +1,45 @@
 const EmployeesAttendance = require('../models/employeesAttendance');
 const AttendanceAdjustmentRequest = require('../models/attendanceAdjustmentRequest');
 const moment = require('moment-timezone');
-const Log = require('../models/log');
 const Employee = require('../models/employee');
+// const Employee = require('../models/employee');
 const Shift = require('../models/shift'); // Import Shift model
 
 
 exports.getAttendance = async (req, res) => {
   try {
-    const { employeeId, startDate, endDate } = req.query;
+    const { employeeId, startDate, endDate, search } = req.query;
     const query = req.user.role === 'Employee' || req.user.role === 'Manager' ? { companyId: req.user.companyId } : {};
+
+    let employeeFilterIds = [];
+    if (search) {
+      const employees = await Employee.find({
+        fullName: { $regex: search, $options: 'i' },
+        companyId: req.user.companyId // Ensure search is within the user's company
+      }).select('_id');
+      employeeFilterIds = employees.map(emp => emp._id);
+
+      if (employeeFilterIds.length === 0) {
+        return res.status(200).json({ success: true, data: [], totals: {} }); // No matching employees, return empty
+      }
+      query.employeeId = { $in: employeeFilterIds };
+    }
+
     if (employeeId) {
+      // If both search and employeeId are provided, ensure employeeId is in the search results
+      if (search && !employeeFilterIds.some(id => id.toString() === employeeId)) {
+        return res.status(200).json({ success: true, data: [], totals: {} }); // employeeId not in search results
+      }
       query.employeeId = employeeId;
       if (req.user.role === 'Employee' && req.user.employeeId.toString() !== employeeId) {
         return res.status(403).json({ success: false, error: 'Access denied' });
       }
+    } else if (search && employeeFilterIds.length > 0) {
+      // If only search is provided, use the filtered employee IDs
+      query.employeeId = { $in: employeeFilterIds };
     }
+
+
     if (startDate || endDate) {
       query.date = {};
       if (startDate) {

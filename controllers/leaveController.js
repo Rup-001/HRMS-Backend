@@ -8,7 +8,7 @@ const moment = require('moment-timezone');
 
 exports.createLeaveRequest = async (req, res) => {
   try {
-    const { startDate, endDate, type, isHalfDay } = req.body;
+    const { startDate, endDate, type, isHalfDay, remarks } = req.body;
     if (!startDate || !endDate || !type) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
@@ -98,6 +98,7 @@ exports.createLeaveRequest = async (req, res) => {
       endDate: end,
       type,
       isHalfDay,
+      remarks, // Include remarks field
       approverId: employee.managerId // Automatically set to employee's manager
     });
     await leaveRequest.save();
@@ -129,12 +130,9 @@ exports.approveLeaveRequest = async (req, res) => {
     const year = moment(leaveRequest.startDate).year();
 
     if (leaveType !== 'remote') { // Do not deduct for remote work
-      const entitlement = await LeaveEntitlement.findOne({ employeeId: leaveRequest.employeeId, year });
-      if (entitlement && entitlement[leaveType] !== undefined) {
-        entitlement[leaveType] -= leaveRequest.isHalfDay ? 0.5 : leaveDuration;
-        await entitlement.save();
-        console.log(`✅ Deducted ${leaveRequest.isHalfDay ? 0.5 : leaveDuration} days of ${leaveType} leave for employee ${leaveRequest.employeeId}`);
-      }
+      // The entitlement is now considered the initial allocation.
+      // The actual balance will be calculated dynamically by getLeaveSummary.
+      // No direct deduction from entitlement here.
     }
 
     // Update EmployeesAttendance for each date in the range

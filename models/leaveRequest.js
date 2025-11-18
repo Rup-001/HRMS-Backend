@@ -8,7 +8,8 @@ const leaveRequestSchema = new mongoose.Schema({
   type: { type: String, enum: ['casual', 'sick', 'festive', 'annual', 'maternity', 'remote'], required: true },
   status: { type: String, enum: ['pending', 'approved', 'denied'], default: 'pending' },
   approverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
-  isHalfDay: { type: Boolean, default: false }
+  isHalfDay: { type: Boolean, default: false },
+  remarks: { type: String },
 }, { timestamps: true });
 
 // module.exports = mongoose.model('LeaveRequest', leaveRequestSchema);
