@@ -71,22 +71,35 @@ exports.createLeaveRequest = async (req, res) => {
         return res.status(400).json({ success: false, error: 'Leave entitlement not found for current year.' });
       }
 
-      // Calculate leave taken for the current year
-      const approvedLeaves = await LeaveRequest.find({
+      console.log(`[Leave Balance Check] Employee: ${req.user.employeeId}, Leave Type: ${type}, Year: ${year}`);
+      console.log(`[Leave Balance Check] Entitlement for ${type}: ${entitlement[type]}`);
+
+      // Calculate leave taken for the current year, including pending and approved
+      const approvedAndPendingLeaves = await LeaveRequest.find({
         employeeId: req.user.employeeId,
-        status: 'approved',
+        status: { $in: ['approved', 'pending'] },
         type: type,
         $expr: { $eq: [{ $year: "$startDate" }, year] }
       });
 
+      console.log(`[Leave Balance Check] Found ${approvedAndPendingLeaves.length} approved/pending leaves.`);
+
       let leaveTaken = 0;
-      for (const leave of approvedLeaves) {
-        leaveTaken += leave.isHalfDay ? 0.5 : (moment(leave.endDate).diff(moment(leave.startDate), 'days') + 1);
+      for (const leave of approvedAndPendingLeaves) {
+        const duration = leave.isHalfDay ? 0.5 : (moment(leave.endDate).diff(moment(leave.startDate), 'days') + 1);
+        leaveTaken += duration;
+        console.log(`[Leave Balance Check] - Pending/Approved Leave: ${leave._id}, Duration: ${duration}`);
       }
 
+      console.log(`[Leave Balance Check] Total Leave Taken (Approved + Pending): ${leaveTaken}`);
+      
       const availableLeave = entitlement[type] - leaveTaken;
+      
+      console.log(`[Leave Balance Check] Available Leave: ${availableLeave} (Entitlement: ${entitlement[type]} - Taken: ${leaveTaken})`);
+      console.log(`[Leave Balance Check] Current Request Duration: ${isHalfDay ? 0.5 : leaveDuration}`);
 
       if (availableLeave < (isHalfDay ? 0.5 : leaveDuration)) {
+        console.log(`[Leave Balance Check] INSUFFICIENT LEAVE. Available: ${availableLeave}, Requested: ${isHalfDay ? 0.5 : leaveDuration}`);
         return res.status(400).json({ success: false, error: `Insufficient ${type} leave. Available: ${availableLeave} days.` });
       }
     }
@@ -443,9 +456,9 @@ exports.getLeaveSummary = async (req, res) => {
       };
     }
 
-    const approvedLeaves = await LeaveRequest.find({
+    const leaves = await LeaveRequest.find({
       employeeId,
-      status: 'approved',
+      status: { $in: ['approved', 'pending'] },
       $expr: { $eq: [{ $year: "$startDate" }, parseInt(summaryYear)] }
     });
 
@@ -457,7 +470,7 @@ exports.getLeaveSummary = async (req, res) => {
       festive: 0
     };
 
-    for (const leave of approvedLeaves) {
+    for (const leave of leaves) {
       if (leave.type !== 'remote') {
         const duration = moment(leave.endDate).diff(moment(leave.startDate), 'days') + 1;
         leaveTaken[leave.type] += leave.isHalfDay ? 0.5 : duration;
