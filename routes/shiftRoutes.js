@@ -1,19 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const shiftController = require('../controllers/shiftController');
-const auth = require('../middleware/auth');
-
-const restrictTo = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
-    }
-    next();
-  };
-};
+const { authenticate, restrictTo } = require('../middleware/auth');
 
 // All shift routes require authentication
-router.use(auth.authenticate('jwt', { session: false }));
+router.use(authenticate('jwt', { session: false }));
 
 // Create a new shift
 router.post('/', restrictTo('HR Manager', 'Super Admin', 'Company Admin'), shiftController.createShift);

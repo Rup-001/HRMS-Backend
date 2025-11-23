@@ -213,125 +213,6 @@ exports.denyLeaveRequest = async (req, res) => {
   }
 };
 
-// exports.getLeaveRequests = async (req, res) => {
-//   try {
-//     const query = req.user.role === 'Employee' 
-//       ? { employeeId: req.user.employeeId, companyId: req.user.companyId } 
-//       : req.user.role === 'Manager' 
-//       ? { approverId: req.user.employeeId, companyId: req.user.companyId } 
-//       : { companyId: req.user.companyId };
-//     const leaveRequests = await LeaveRequest.find(query)
-//       .populate('employeeId', 'fullName newEmployeeCode')
-//       .populate('approverId', 'fullName');
-//     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
-//     res.status(200).json({ success: true, data: leaveRequests });
-//   } catch (error) {
-//     console.error(`❌ Error retrieving leave requests: ${error.message}`);
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
-
-// exports.getLeaveRequests = async (req, res) => {
-//   try {
-//     let query;
-
-//     if (req.user.role === 'Employee') {
-//       query = { employeeId: req.user.employeeId, companyId: req.user.companyId };
-//     } else if (req.user.role === 'Manager') {
-//       query = { approverId: req.user.employeeId, companyId: req.user.companyId };
-//     } else if (['Super Admin', 'C-Level Executive'].includes(req.user.role)) {
-//       // ✅ Super Admin & C Level Executive see everything in their company
-//       query = { companyId: req.user.companyId };
-//     } else {
-//       // Default fallback: restrict to their own company (if you have other roles)
-//       query = { companyId: req.user.companyId };
-//     }
-
-//     const leaveRequests = await LeaveRequest.find(query)
-//       .populate('employeeId', 'fullName newEmployeeCode')
-//       .populate('approverId', 'fullName');
-
-//     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
-//     res.status(200).json({ success: true, data: leaveRequests });
-//   } catch (error) {
-//     console.error(`❌ Error retrieving leave requests: ${error.message}`);
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
-
-// exports.getLeaveRequests = async (req, res) => {
-//   try {
-//     let query;
-
-//     if (req.user.role === 'Employee') {
-//       // 🧍 Employee → only their own leave requests
-//       query = { employeeId: req.user.employeeId, companyId: req.user.companyId };
-//     } else if (req.user.role === 'Manager') {
-//       // 👨‍💼 Manager → Find employees who report to this manager
-//       const employees = await Employee.find({ managerId: req.user.employeeId, companyId: req.user.companyId });
-//       const employeeIds = employees.map(emp => emp._id);
-//       // Fetch leave requests for those employees
-//       query = { employeeId: { $in: employeeIds }, companyId: req.user.companyId };
-//     } else if (req.user.role === 'Super Admin' || req.user.role === 'HR Manager') {
-//       // 🧑‍💻 Super Admin & HR Manager → all requests within their company
-//       query = { companyId: req.user.companyId };
-//     } else if (req.user.role === 'C-Level Executive') {
-//       // 🏢 C Level Executive → all requests across all companies
-//       query = {}; // ✅ No filter = see everything
-//     } else {
-//       // 🛡️ Default: restrict to same company
-//       query = { companyId: req.user.companyId };
-//     }
-
-//     const leaveRequests = await LeaveRequest.find(query)
-//       .populate('employeeId', 'fullName newEmployeeCode')
-//       .populate('approverId', 'fullName');
-
-//     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
-//     res.status(200).json({ success: true, data: leaveRequests });
-//   } catch (error) {
-//     console.error(`❌ Error retrieving leave requests: ${error.message}`);
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
-
-// exports.getLeaveRequests = async (req, res) => {
-//   try {
-//     let query;
-
-//     if (req.user.role === 'Employee') {
-//       // 🧍 Employee → only their own leave requests
-//       query = { employeeId: req.user.employeeId, companyId: req.user.companyId };
-//     } else if (req.user.role === 'Manager') {
-//       // 👨‍💼 Manager → Find employees who report to this manager
-//       const employees = await Employee.find({ managerId: req.user.employeeId, companyId: req.user.companyId });
-//       const employeeIds = employees.map(emp => emp._id);
-//       // Fetch leave requests for those employees
-//       query = { employeeId: { $in: employeeIds }, companyId: req.user.companyId };
-//     } else if (req.user.role === 'Super Admin' || req.user.role === 'HR Manager') {
-//       // 🧑‍💻 Super Admin & HR Manager → all requests within their company
-//       query = { companyId: req.user.companyId };
-//     } else if (req.user.role === 'C-Level Executive') {
-//       // 🏢 C Level Executive → all requests across all companies
-//       query = {}; 
-//     } else {
-//       // 🛡️ Default: restrict to same company
-//       query = { companyId: req.user.companyId };
-//     }
-
-//     const leaveRequests = await LeaveRequest.find(query)
-//       .populate('employeeId', 'fullName newEmployeeCode')
-//       .populate('approverId', 'fullName');
-
-//     console.log(`✅ Retrieved ${leaveRequests.length} leave requests for user: ${req.user.employeeId}, role: ${req.user.role}`);
-//     res.status(200).json({ success: true, data: leaveRequests });
-//   } catch (error) {
-//     console.error(`❌ Error retrieving leave requests: ${error.message}`);
-//     res.status(400).json({ success: false, error: error.message });
-//   }
-// };
 
 exports.getLeaveRequests = async (req, res) => {
   try {
@@ -544,10 +425,29 @@ exports.createLeaveEntitlement = async (employeeId, joiningDate) => {
 
 exports.getLeaveEntitlement = async (req, res) => {
   try {
-    const employeeId = req.params.employeeId || req.user.employeeId;
+    const requestedEmployeeId = req.params.employeeId;
     const year = req.query.year || moment().year();
+    const requestingUser = req.user;
 
-    const entitlement = await LeaveEntitlement.findOne({ employeeId, year });
+    let employeeIdToFetch;
+
+    // If an employeeId is provided in the params, it means a user is trying to fetch another user's entitlement
+    if (requestedEmployeeId) {
+      // Check if the requesting user has the appropriate role to view other users' entitlements
+      if (!['HR Manager', 'Super Admin', 'Company Admin'].includes(requestingUser.role)) {
+        // If not an admin/HR, they can only view their own entitlement
+        if (requestedEmployeeId !== requestingUser.employeeId.toString()) {
+          return res.status(403).json({ success: false, error: 'Access denied. You can only view your own entitlements.' });
+        }
+      }
+      employeeIdToFetch = requestedEmployeeId;
+    } else {
+      // If no employeeId is provided, the user is fetching their own entitlement
+      employeeIdToFetch = requestingUser.employeeId;
+    }
+
+    const entitlement = await LeaveEntitlement.findOne({ employeeId: employeeIdToFetch, year });
+
     if (!entitlement) {
       return res.status(404).json({ success: false, error: 'Leave entitlement not found' });
     }

@@ -24,4 +24,20 @@ passport.use(new JwtStrategy(opts, async (jwt_payload, done) => {
   }
 }));
 
-module.exports = passport;
+const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (req.user.role === 'Super Admin') {
+      return next();
+    }
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+    next();
+  };
+};
+
+module.exports = {
+  initialize: () => passport.initialize(),
+  authenticate: (strategy, options) => passport.authenticate(strategy, options),
+  restrictTo: restrictTo
+};
