@@ -29,7 +29,7 @@ router.get('/policy',
   leaveController.getLeavePolicy
 );
 
-router.patch('/policy', 
+router.patch('/policy/:companyId', 
   authenticate('jwt', { session: false }),
   restrictTo('HR Manager', 'Super Admin', 'Company Admin'),
   leaveController.updateLeavePolicy
@@ -40,6 +40,12 @@ router.post('/generate-entitlements',
   authenticate('jwt', { session: false }),
   restrictTo('Super Admin', 'Company Admin', 'HR Manager'),
   leaveController.generateMissingLeaveEntitlements
+);
+
+router.post('/encash-annual-leave',
+  authenticate('jwt', { session: false }),
+  restrictTo('Employee', 'Manager', 'HR Manager', 'Super Admin', 'Company Admin', 'C-Level Executive'),
+  leaveController.encashAnnualLeave
 );
 
 module.exports = router;

@@ -2,9 +2,8 @@ const moment = require('moment-timezone');
 const Employee = require('../models/employee');
 const EmployeesAttendance = require('../models/EmployeesAttendance');
 const LeaveRequest = require('../models/leaveRequest');
-const Holiday = require('../models/holiday');
+const HolidayCalendar = require('../models/holidayCalendar');
 const Log = require('../models/log');
-const Shift = require('../models/shift');
 
 async function syncAttendance(companyId, startDate, endDate) {
   try {
@@ -13,7 +12,12 @@ async function syncAttendance(companyId, startDate, endDate) {
 
     const employees = await Employee.find({ companyId, deviceUserId: { $ne: null } }).populate('shiftId');
     const logs = await Log.find({ companyId, record_time: { $gte: start.toDate(), $lte: end.toDate() } });
-    const holidays = await Holiday.find({ $or: [{ companyId }, { isNational: true }], date: { $gte: start.toDate(), $lte: end.toDate() } });
+    
+    // Fetch holiday calendar for the year of the start date
+    const year = start.year();
+    const holidayCalendar = await HolidayCalendar.findOne({ companyId, year });
+    const holidays = holidayCalendar ? holidayCalendar.holidays : [];
+
     const leaveRequests = await LeaveRequest.find({ companyId, status: 'approved', startDate: { $lte: end.toDate() }, endDate: { $gte: start.toDate() } });
 
     const userToEmployeeMap = {};
@@ -47,7 +51,7 @@ async function syncAttendance(companyId, startDate, endDate) {
       const isHoliday = holidays.some(h => moment(h.date).isSame(windowStart, 'day'));
 
       for (const employee of employees) {
-        let status = isWeekend ? 'Weekend' : isHoliday ? 'Holiday' : 'Absent';
+        let status;
         let check_in = null;
         let check_out = null;
         let work_hours = null;
@@ -58,6 +62,15 @@ async function syncAttendance(companyId, startDate, endDate) {
         let earlyDepartureBy = 0;
         let isOvertime = false;
         let overtimeHours = 0;
+        
+        if (isWeekend) {
+          status = 'Weekend';
+        } else if (isHoliday) {
+          status = 'Holiday';
+          leave_type = 'festive';
+        } else {
+            status = 'Absent';
+        }
 
         const leave = leaveRequests.find(lr => lr.employeeId.equals(employee._id) && windowStart.isBetween(lr.startDate, lr.endDate, 'day', '[]'));
         if (leave) {

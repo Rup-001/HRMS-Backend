@@ -257,9 +257,8 @@ exports.createEmployee = async (req, res) => {
 };
 
 // ================================================
-// UPDATE EMPLOYEE
+// UPDATE EMPLOYEE - FINAL FIXED VERSION
 // ================================================
-
 exports.updateEmployee = async (req, res) => {
   let oldDocuments = {};
   let userCreated = false;
@@ -305,7 +304,7 @@ exports.updateEmployee = async (req, res) => {
       joiningDate: req.body.joiningDate,
       department: req.body.department,
       designation: req.body.designation,
-      shiftId: req.body.shiftId, // <-- Add shiftId here
+      shiftId: req.body.shiftId,
       employeeStatus: req.body.employeeStatus,
       managerId: req.body.managerId,
       personalPhoneNumber: req.body.personalPhoneNumber,
@@ -313,6 +312,7 @@ exports.updateEmployee = async (req, res) => {
       presentAddress: req.body.presentAddress,
       gender: req.body.gender,
       dob: req.body.dob,
+      lastWorkingDay: req.body.lastWorkingDay || null, // Important: allow null
       passportSizePhoto: uploadedFiles.passportSizePhoto ? `/${uploadedFiles.passportSizePhoto}` : employee.passportSizePhoto,
       appointmentLetter: uploadedFiles.appointmentLetter ? `/${uploadedFiles.appointmentLetter}` : employee.appointmentLetter,
       resume: uploadedFiles.resume ? `/${uploadedFiles.resume}` : employee.resume,
@@ -337,7 +337,7 @@ exports.updateEmployee = async (req, res) => {
       Object.entries(allowedUpdates).filter(([_, v]) => v !== undefined)
     );
 
-    // ---------- DEVICE USER: STRICT ----------
+    // ========== DEVICE USER ==========
     if ((createDeviceUser === true || createDeviceUser === 'true') && !employee.deviceUserId) {
       const existsOnDevice = await zkService.checkUserExistsOnDevice(employee.newEmployeeCode);
       if (existsOnDevice) {
@@ -356,7 +356,7 @@ exports.updateEmployee = async (req, res) => {
       await employee.save();
     }
 
-    // ---------- USER ACCOUNT ----------
+    // ========== USER ACCOUNT ==========
     if (createUser === true || createUser === 'true') {
       if (!req.body.email) throw new Error('Email is required to create a user');
       if (await User.findOne({ email: req.body.email })) throw new Error('Email already exists');
@@ -403,45 +403,51 @@ exports.updateEmployee = async (req, res) => {
       }
     }
 
-    // ---------- UPDATE EMPLOYEE ----------
+    // ========== UPDATE EMPLOYEE ==========
     const updatedEmployee = await Employee.findByIdAndUpdate(
       req.params.id,
       updates,
       { new: true, runValidators: true }
     );
 
+    // ========== CRITICAL: RECALCULATE LEAVE ENTITLEMENT ON FIRST SAVE ==========
+    const oldJoiningStr = employee.joiningDate ? moment(employee.joiningDate).format('YYYY-MM-DD') : null;
+    const newJoiningStr = updates.joiningDate ? moment(updates.joiningDate).format('YYYY-MM-DD') : oldJoiningStr;
+
+    const oldLWDStr = employee.lastWorkingDay ? moment(employee.lastWorkingDay).format('YYYY-MM-DD') : null;
+    const newLWDStr = req.body.lastWorkingDay !== undefined 
+      ? (req.body.lastWorkingDay ? moment(req.body.lastWorkingDay).format('YYYY-MM-DD') : null)
+      : oldLWDStr;
+
+    const joiningDateChanged = oldJoiningStr !== newJoiningStr;
+    const lastWorkingDayChanged = oldLWDStr !== newLWDStr;
+
+    if (joiningDateChanged || lastWorkingDayChanged) {
+      console.log('Joining date or Last Working Day changed → Recalculating leave entitlements...');
+      console.log(`Old Joining: ${oldJoiningStr} → New: ${newJoiningStr}`);
+      console.log(`Old LWD: ${oldLWDStr} → New: ${newLWDStr}`);
+
+      await leaveController.recalculateEmployeeLeaveEntitlements(
+        updatedEmployee._id,
+        updates.joiningDate || employee.joiningDate
+      );
+    }
+
+    // Role sync with User model
     if (updates.role) {
-      const user = await User.findOne({ employeeId: req.params.id });
-      if (user) {
-        await User.updateOne({ employeeId: req.params.id }, { role: updates.role });
-      }
+      await User.updateOne({ employeeId: req.params.id }, { role: updates.role });
     }
 
-    if (employee.hasUserAccount) {
-      const userUpdates = {};
-      if (updates.role) userUpdates.role = updates.role;
-      if (updates.email) userUpdates.email = updates.email;
-      if (Object.keys(userUpdates).length > 0) {
-        await User.updateOne({ employeeId: req.params.id }, { $set: userUpdates });
-      }
+    if (employee.hasUserAccount && updates.email) {
+      await User.updateOne({ employeeId: req.params.id }, { email: updates.email });
     }
-
-    // ---------- DELETE OLD FILES ----------
-    // for (const field of fileFields) {
-    //   if (uploadedFiles[field] && oldDocuments[field]) {
-    //     try {
-    //       await fs.unlink(path.join(__dirname, '..', oldDocuments[field]));
-    //     } catch (err) {
-    //       console.error(`Error deleting old ${field}:`, err);
-    //     }
-    //   }
-    // }
 
     res.status(200).json({ success: true, data: updatedEmployee });
 
   } catch (error) {
     console.error('updateEmployee - Error:', error);
 
+    // Cleanup uploaded files
     for (const filePath of Object.values(uploadedFiles)) {
       await fs.unlink(filePath).catch(() => {});
     }
@@ -514,7 +520,8 @@ exports.getEmployees = async (req, res) => {
           resume: 1,
           nidCopy: 1,
           hasUserAccount: 1,
-          invitationStatus: '$user.invitationStatus'
+          invitationStatus: '$user.invitationStatus',
+          gender: 1 // Add gender to the projected fields
         }
       },
       {
