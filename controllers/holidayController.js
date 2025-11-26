@@ -1,32 +1,43 @@
-const Holiday = require('../models/holiday');
-const moment = require('moment-timezone');
 
-exports.createHoliday = async (req, res) => {
+const moment = require('moment-timezone');
+const HolidayCalendar = require('../models/holidayCalendar');
+
+exports.setHolidaysForYear = async (req, res) => {
+  const { year, holidays } = req.body;
+
+  if (!year || !holidays) {
+    return res.status(400).json({ success: false, error: 'Year and holidays are required.' });
+  }
+
   try {
-    const { date, name, isNational } = req.body;
-    if (!date || !name) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
-    }
-    const holiday = new Holiday({
-      companyId: isNational ? null : req.user.companyId,
-      date: moment.tz(date, 'Asia/Dhaka').startOf('day').toDate(),
-      name,
-      isNational
-    });
-    await holiday.save();
-    res.status(201).json({ success: true, data: holiday });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
+    const calendar = await HolidayCalendar.findOneAndUpdate(
+      { companyId: req.user.companyId, year },
+      { 
+        companyId: req.user.companyId,
+        year,
+        holidays: holidays.map(h => ({
+          startDate: moment(h.startDate).startOf('day').toDate(),
+          endDate: h.endDate ? moment(h.endDate).startOf('day').toDate() : moment(h.startDate).startOf('day').toDate(),
+          name: h.name,
+          type: h.type || 'national',
+          applicableToAll: h.applicableToAll !== false
+        }))
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+
+    res.json({ success: true, data: calendar });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
   }
 };
 
-exports.getHolidays = async (req, res) => {
+exports.getHolidaysForYear = async (req, res) => {
+  const { year = moment().year() } = req.query;
   try {
-    const query = req.user.role === 'Employee' || req.user.role === 'Manager' ? 
-                 { $or: [{ companyId: req.user.companyId }, { isNational: true }] } : {};
-    const holidays = await Holiday.find(query);
-    res.status(200).json({ success: true, data: holidays });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
+    const calendar = await HolidayCalendar.findOne({ companyId: req.user.companyId, year });
+    res.json({ success: true, data: calendar || { year, holidays: [] } });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
   }
 };

@@ -2,7 +2,7 @@ const Employee = require('../models/employee');
 const EmployeesAttendance = require('../models/employeesAttendance');
 const Payslip = require('../models/payslip');
 const LeaveRequest = require('../models/leaveRequest');
-const Holiday = require('../models/holiday');
+const HolidayCalendar = require('../models/holidayCalendar');
 const moment = require('moment-timezone');
 
 exports.getEmployeeDashboard = async (req, res) => {
@@ -38,13 +38,13 @@ exports.getEmployeeDashboard = async (req, res) => {
       startDate: { $gte: moment().startOf('day').toDate() }
     }).select('startDate endDate type status isHalfDay');
 
-    const holidays = await Holiday.find({
-      $or: [{ companyId }, { isNational: true }],
-      date: {
-        $gte: moment().startOf('day').toDate(),
-        $lte: moment().add(30, 'days').endOf('day').toDate()
-      }
-    }).select('date name isNational');
+    const currentYear = moment().year();
+    const holidayCalendar = await HolidayCalendar.findOne({ companyId, year: currentYear });
+
+    const upcomingHolidays = holidayCalendar ? holidayCalendar.holidays.filter(h => {
+      const holidayDate = moment(h.date);
+      return holidayDate.isBetween(moment().startOf('day'), moment().add(30, 'days').endOf('day'));
+    }) : [];
 
     const response = {
       personalInfo: {
@@ -77,10 +77,10 @@ exports.getEmployeeDashboard = async (req, res) => {
         status: l.status,
         isHalfDay: l.isHalfDay
       })),
-      holidays: holidays.map(h => ({
+      holidays: upcomingHolidays.map(h => ({
         date: moment(h.date).format('YYYY-MM-DD'),
         name: h.name,
-        isNational: h.isNational
+        type: h.type
       }))
     };
 

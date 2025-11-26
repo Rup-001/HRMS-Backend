@@ -13,10 +13,15 @@ async function syncAttendance(companyId, startDate, endDate) {
     const employees = await Employee.find({ companyId, deviceUserId: { $ne: null } }).populate('shiftId');
     const logs = await Log.find({ companyId, record_time: { $gte: start.toDate(), $lte: end.toDate() } });
     
-    // Fetch holiday calendar for the year of the start date
-    const year = start.year();
-    const holidayCalendar = await HolidayCalendar.findOne({ companyId, year });
-    const holidays = holidayCalendar ? holidayCalendar.holidays : [];
+    // Fetch holiday calendars for all years in the date range
+    const startYear = start.year();
+    const endYear = end.year();
+    const years = [];
+    for (let y = startYear; y <= endYear; y++) {
+        years.push(y);
+    }
+    const holidayCalendars = await HolidayCalendar.find({ companyId, year: { $in: years } }).lean();
+    const holidays = holidayCalendars.flatMap(cal => cal.holidays);
 
     const leaveRequests = await LeaveRequest.find({ companyId, status: 'approved', startDate: { $lte: end.toDate() }, endDate: { $gte: start.toDate() } });
 
@@ -48,7 +53,12 @@ async function syncAttendance(companyId, startDate, endDate) {
       const windowStart = dateIterator.clone().set({ hour: 6, minute: 0, second: 0 });
       const windowKey = windowStart.format('YYYY-MM-DD');
       const isWeekend = windowStart.day() === 5 || windowStart.day() === 6;
-      const isHoliday = holidays.some(h => moment(h.date).isSame(windowStart, 'day'));
+      
+      const isHoliday = holidays.some(h => {
+        const holidayStart = moment(h.startDate).startOf('day');
+        const holidayEnd = h.endDate ? moment(h.endDate).endOf('day') : holidayStart.clone().endOf('day');
+        return windowStart.isBetween(holidayStart, holidayEnd, 'day', '[]');
+      });
 
       for (const employee of employees) {
         let status;

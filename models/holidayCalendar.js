@@ -7,7 +7,8 @@ const holidayCalendarSchema = new Schema({
   year: { type: Number, required: true },
   holidays: [
     {
-      date: { type: Date, required: true },        // e.g., 2025-04-14
+      startDate: { type: Date, required: true },   // e.g., 2025-04-14
+      endDate: { type: Date },                      // Optional, for multi-day holidays
       name: { type: String, required: true },     // e.g., "Pohela Boishakh"
       type: { type: String, enum: ['national', 'religious'], default: 'national' },
       applicableToAll: { type: Boolean, default: true }
