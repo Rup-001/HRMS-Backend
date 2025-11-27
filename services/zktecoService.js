@@ -273,45 +273,34 @@ class ZKService {
 //   }
 // }
 
-
 // 🔹 Sync logs
 async syncDeviceLogs() {
   try {
     await this.connect();
     const deviceId = process.env.ZKTECO_DEVICE_IP;
-    // Get last synced timestamp for this device
+
+    // Get last synced timestamp
     const lastSync = await LastSync.findOne({ deviceId });
     const lastSyncTimestamp = lastSync ? lastSync.lastSyncTimestamp : new Date(0);
-    console.log(`🔍 Fetching logs since ${moment(lastSyncTimestamp).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')} for device ${deviceId} at ${moment().tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')}`);
+    console.log(`🔍 Fetching logs since ${moment(lastSyncTimestamp).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')} (Dhaka)`);
 
     const logs = (await this.device.getAttendances()).data || [];
     console.log(`📡 Received ${logs.length} total logs from device`);
     console.log('📜 Raw logs (first 5):', JSON.stringify(logs.slice(0, 5), null, 2));
 
-    // Validate logs
     if (!Array.isArray(logs)) {
       throw new Error('Invalid log data from device');
     }
 
-    // Filter logs newer than lastSyncTimestamp
+    // === FIX 1: Parse ZKTeco time as LOCAL Dhaka time ===
     const newLogs = logs
       .filter(l => {
-        if (!l || !l.user_id || !l.record_time) {
-          console.warn('⚠️ Invalid log entry:', JSON.stringify(l, null, 2));
-          return false;
-        }
+        if (!l || !l.user_id || !l.record_time) return false;
         try {
-          // Validate it's a proper time string in Asia/Dhaka
           const parsed = moment.tz(l.record_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka', true);
-          if (!parsed.isValid()) {
-            console.warn('⚠️ Invalid timestamp in log:', JSON.stringify(l, null, 2));
-            return false;
-          }
-          const isNew = parsed.toDate() > lastSyncTimestamp;
-          console.log(`📅 Log for user ${l.user_id} at ${parsed.format('YYYY-MM-DD HH:mm:ss')}: ${isNew ? 'NEW' : 'OLD'}`);
-          return isNew;
-        } catch (err) {
-          console.warn('⚠️ Error parsing log timestamp:', JSON.stringify(l, null, 2), err.message);
+          if (!parsed.isValid()) return false;
+          return parsed.toDate() > lastSyncTimestamp;
+        } catch {
           return false;
         }
       })
@@ -326,12 +315,12 @@ async syncDeviceLogs() {
         };
       });
 
-    console.log(`✅ Filtered ${newLogs.length} new logs out of ${logs.length} total`);
+    console.log(`✅ Filtered ${newLogs.length} new logs`);
 
     let synced = 0;
     let latestTimestamp = lastSyncTimestamp;
 
-    // Insert new logs to Log model
+    // Save to Log model
     if (newLogs.length > 0) {
       const bulkOps = newLogs.map(log => ({
         updateOne: {
@@ -340,17 +329,12 @@ async syncDeviceLogs() {
           upsert: true
         }
       }));
-      try {
-        const result = await Log.bulkWrite(bulkOps);
-        synced = result.upsertedCount + result.modifiedCount;
-        console.log(`✅ Bulk write to Log: ${result.upsertedCount} upserted, ${result.modifiedCount} modified`);
-      } catch (error) {
-        console.error(`❌ Error saving logs to Log model: ${error.message}`);
-        throw error;
-      }
+      const result = await Log.bulkWrite(bulkOps);
+      synced = result.upsertedCount + result.modifiedCount;
+      console.log(`✅ Saved ${synced} logs to Log model`);
     }
 
-    // Process attendance for each new log
+    // === FIX 2: Process Attendance in Dhaka Time ===
     for (const log of newLogs) {
       const employee = await Employee.findOne({ deviceUserId: log.user_id });
       if (!employee) {
@@ -358,30 +342,24 @@ async syncDeviceLogs() {
         continue;
       }
 
-      // log.timestamp is already a Date object in Asia/Dhaka time
-      const logLocalTime = log.timestamp;
+      const logLocalTime = log.timestamp; // Already correct Dhaka time
       const attendanceDateDhaka = moment.tz(logLocalTime, 'Asia/Dhaka').startOf('day').toDate();
 
-      console.log(`Processing log for ${employee.fullName || employee._id} at ${moment(logLocalTime).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')} (Dhaka)`);
-
-      // Find or create attendance record for this Dhaka date
       let attendance = await EmployeesAttendance.findOne({
         employeeId: employee._id,
         date: attendanceDateDhaka
       });
 
       if (attendance) {
-        // Existing record — update check-in/check-out
+        // Update earliest check-in, latest check-out
         if (!attendance.check_in || logLocalTime < attendance.check_in) {
           attendance.check_in = logLocalTime;
-          console.log(`Updated check-in → ${moment(logLocalTime).tz('Asia/Dhaka').format('HH:mm:ss')}`);
         }
         if (!attendance.check_out || logLocalTime > attendance.check_out) {
           attendance.check_out = logLocalTime;
-          console.log(`Updated check-out → ${moment(logLocalTime).tz('Asia/Dhaka').format('HH:mm:ss')}`);
         }
       } else {
-        // New record
+        // Create new record
         attendance = new EmployeesAttendance({
           companyId: employee.companyId,
           employeeId: employee._id,
@@ -391,50 +369,46 @@ async syncDeviceLogs() {
           status: 'Incomplete',
           work_hours: 0
         });
-        console.log(`Created new attendance record for ${moment(attendanceDateDhaka).format('YYYY-MM-DD')}`);
       }
 
-      // Recalculate work hours and status
+      // Recalculate work hours
       if (attendance.check_in && attendance.check_out) {
         const hours = (attendance.check_out - attendance.check_in) / (1000 * 60 * 60);
         attendance.work_hours = Math.round(hours * 100) / 100;
-        attendance.status = hours >= 1 ? 'Present' : 'Incomplete';
+        attendance.status = hours >= 0.1 ? 'Present' : 'Incomplete'; // Avoid floating point 0
       } else if (attendance.check_in) {
         attendance.status = 'Incomplete';
+      } else {
+        attendance.status = 'Absent';
       }
 
       await attendance.save();
+      console.log(`✅ Attendance updated: ${employee.fullName || employee._id} on ${moment(attendanceDateDhaka).format('YYYY-MM-DD')} | In: ${attendance.check_in ? moment(attendance.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : '-'} | Out: ${attendance.check_out ? moment(attendance.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : '-'}`);
 
-      // Update latestTimestamp for LastSync
       if (logLocalTime > latestTimestamp) {
         latestTimestamp = logLocalTime;
       }
     }
 
-    // Update last sync timestamp if new logs were processed
+    // Update LastSync
     if (synced > 0) {
-      try {
-        await LastSync.updateOne(
-          { deviceId },
-          { $set: { lastSyncTimestamp: latestTimestamp } },
-          { upsert: true }
-        );
-        console.log(`✅ Updated last sync timestamp to ${moment(latestTimestamp).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')} for device ${deviceId}`);
-      } catch (error) {
-        console.error(`❌ Error updating LastSync: ${error.message}`);
-      }
-    } else {
-      console.log(`ℹ️ No new logs to update last sync timestamp`);
+      await LastSync.updateOne(
+        { deviceId },
+        { $set: { lastSyncTimestamp: latestTimestamp } },
+        { upsert: true }
+      );
+      console.log(`✅ LastSync updated to ${moment(latestTimestamp).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')}`);
     }
 
     await this.disconnect();
+
     const totalLogs = await Log.countDocuments();
     const attendanceCount = await EmployeesAttendance.countDocuments();
-    console.log(`✅ Sync completed: ${synced} new logs processed, total logs: ${totalLogs}, total attendance records: ${attendanceCount}`);
+    console.log(`✅ Sync completed: ${synced} new logs, ${totalLogs} total logs, ${attendanceCount} attendance records`);
 
     return { success: true, count: synced, total: totalLogs, attendanceCount };
   } catch (error) {
-    console.error(`❌ Log sync failed at ${moment().tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')}:`, error.message);
+    console.error(`❌ Sync failed:`, error.message);
     await this.disconnect();
     throw error;
   }
