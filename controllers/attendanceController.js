@@ -409,9 +409,11 @@ exports.getAttendance = async (req, res) => {
 
 
 exports.getEmployeeAttendance = async (req, res) => {
+  console.log('🕵️‍♂️ [JAMES BOND] Received request for getEmployeeAttendance');
   try {
     const { employeeId, startDate, endDate } = req.query;
-    
+    console.log('🕵️‍♂️ [JAMES BOND] Request Query Params:', { employeeId, startDate, endDate });
+
     // Base query
     const query = {};
 
@@ -431,6 +433,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       }
     } else {
       // Default to current month if no dates are provided
+      console.log('🕵️‍♂️ [JAMES BOND] No dates provided, defaulting to current month.');
       const now = moment.tz('Asia/Dhaka');
       query.date = {
         $gte: now.clone().startOf('month').toDate(),
@@ -438,10 +441,19 @@ exports.getEmployeeAttendance = async (req, res) => {
       };
     }
 
+    console.log('🕵️‍♂️ [JAMES BOND] Executing MongoDB query with:', JSON.stringify(query, null, 2));
+
     const attendance = await EmployeesAttendance.find(query)
       .populate('employeeId', 'newEmployeeCode fullName deviceUserId')
       .sort({ date: -1 }) // Sort by most recent date first
       .lean();
+
+    console.log(`🕵️‍♂️ [JAMES BOND] MongoDB returned ${attendance.length} records.`);
+
+    if (attendance.length === 0) {
+        console.log('🕵️‍♂️ [JAMES BOND] Returning empty data array as no records were found.');
+        return res.status(200).json({ success: true, data: [] });
+    }
 
     const result = attendance.map(record => ({
       ...record, // Spread the original record
@@ -456,11 +468,12 @@ exports.getEmployeeAttendance = async (req, res) => {
       work_hours: record.work_hours != null ? Number(record.work_hours) : null,
       overtimeHours: record.overtimeHours != null ? Number(record.overtimeHours) : 0,
     }));
-
+    
+    console.log(`🕵️‍♂️ [JAMES BOND] Sending ${result.length} processed records to frontend.`);
     res.status(200).json({ success: true, data: result });
 
   } catch (error) {
-    console.error('Error in getEmployeeAttendance:', error);
+    console.error('🕵️‍♂️ [JAMES BOND] !! ERROR !! in getEmployeeAttendance:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
