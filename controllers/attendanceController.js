@@ -5,187 +5,6 @@ const Employee = require('../models/employee');
 const HolidayCalendar = require('../models/holidayCalendar'); // Import HolidayCalendar model
 const LeaveRequest = require('../models/leaveRequest'); // Import LeaveRequest model
 
-// exports.getAttendance = async (req, res) => {
-//   try {
-//     // 1. Extract and Validate Query Parameters
-//     let { employeeId, startDate, endDate, search } = req.query;
-//     const { companyId } = req.user;
-//     const userRole = req.user.role;
-
-//     const now = moment.tz('Asia/Dhaka');
-//     const defaultStart = now.clone().startOf('month');
-//     const defaultEnd = now.clone().endOf('month');
-
-//     let start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day') : defaultStart;
-//     let end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day') : defaultEnd;
-
-//     if (!start.isValid() || !end.isValid()) {
-//       return res.status(400).json({ success: false, error: 'Invalid date format. Use YYYY-MM-DD.' });
-//     }
-//     if (start.isAfter(end)) {
-//       return res.status(400).json({ success: false, error: 'Start date cannot be after end date.' });
-//     }
-
-//     // 2. Role-based Employee Filtering
-//     let employeeQuery = { companyId };
-//     if (employeeId) employeeQuery._id = employeeId;
-    
-//     if (search) {
-//       const searchEmployees = await Employee.find({ 
-//         fullName: { $regex: search, $options: 'i' }, 
-//         companyId 
-//       }).select('_id');
-//       const searchIds = searchEmployees.map(e => e._id.toString());
-//       if (employeeQuery._id) {
-//           if (!searchIds.includes(employeeQuery._id.toString())) {
-//               return res.status(200).json({ success: true, data: [], totals: {} });
-//           }
-//       } else {
-//         employeeQuery._id = { $in: searchIds };
-//       }
-//     }
-
-//     if (userRole === 'Employee') {
-//       employeeQuery._id = req.user.employeeId;
-//     } else if (userRole === 'Manager') {
-//       const managed = await Employee.find({ managerId: req.user.employeeId, companyId }).select('_id');
-//       const allowedIds = [req.user.employeeId.toString(), ...managed.map(m => m._id.toString())];
-      
-//       if (employeeQuery._id) {
-//         if (!allowedIds.includes(employeeQuery._id.toString())) {
-//           return res.status(403).json({ success: false, error: 'Access Denied.' });
-//         }
-//       } else {
-//         employeeQuery._id = { $in: allowedIds };
-//       }
-//     }
-
-//     // 3. Fetch Data
-//     const employees = await Employee.find(employeeQuery).populate('shiftId').lean();
-//     if (employees.length === 0) {
-//       return res.status(200).json({ success: true, data: [], totals: {} });
-//     }
-//     const employeeIds = employees.map(e => e._id);
-    
-//     const startYear = start.year();
-//     const endYear = end.year();
-//     const years = [];
-//     for (let y = startYear; y <= endYear; y++) {
-//       years.push(y);
-//     }
-//     const holidayCalendars = await HolidayCalendar.find({ companyId, year: { $in: years } }).lean();
-//     const holidays = holidayCalendars.flatMap(cal => cal.holidays);
-
-//     const [rawAttendanceRecords, leaveRequests] = await Promise.all([
-//       EmployeesAttendance.find({
-//         employeeId: { $in: employeeIds },
-//         date: { $gte: start.toDate(), $lte: end.toDate() }
-//       }).lean(),
-//       LeaveRequest.find({
-//         employeeId: { $in: employeeIds },
-//         status: 'approved',
-//         startDate: { $lte: end.toDate() },
-//         endDate: { $gte: start.toDate() }
-//       }).lean()
-//     ]);
-    
-//     // Maps for quick lookup
-//     const attendanceMap = new Map();
-//     rawAttendanceRecords.forEach(rec => {
-//       const dateKey = moment(rec.date).tz('Asia/Dhaka').format('YYYY-MM-DD');
-//       attendanceMap.set(`${rec.employeeId}_${dateKey}`, rec);
-//     });
-
-//     const leaveMap = new Map();
-//     leaveRequests.forEach(lr => {
-//       let cur = moment(lr.startDate).tz('Asia/Dhaka').startOf('day');
-//       const endLeave = moment(lr.endDate).tz('Asia/Dhaka').endOf('day');
-//       while (cur.isSameOrBefore(endLeave, 'day')) {
-//         leaveMap.set(`${lr.employeeId}_${cur.format('YYYY-MM-DD')}`, lr);
-//         cur.add(1, 'day');
-//       }
-//     });
-
-//     // 4. Build Final Attendance Records
-//     const finalAttendance = [];
-//     let currentDay = start.clone();
-//     while (currentDay.isSameOrBefore(end)) {
-//       const dateStr = currentDay.format('YYYY-MM-DD');
-
-//       const isHoliday = holidays.some(h => {
-//         const holidayStart = moment(h.startDate).startOf('day');
-//         const holidayEnd = h.endDate ? moment(h.endDate).endOf('day') : holidayStart.clone().endOf('day');
-//         return currentDay.isBetween(holidayStart, holidayEnd, 'day', '[]');
-//       });
-
-//       for (const employee of employees) {
-//         const empIdStr = employee._id.toString();
-//         const key = `${empIdStr}_${dateStr}`;
-//         const rec = attendanceMap.get(key);
-//         const leave = leaveMap.get(key);
-
-//         const record = {
-//           employeeId: empIdStr,
-//           employeeCode: employee.newEmployeeCode || employee.employeeCode,
-//           fullName: employee.fullName,
-//           date: dateStr,
-//           status: 'Absent',
-//           check_in: null, check_out: null, work_hours: 0, leave_type: null,
-//           isLate: false, lateBy: 0, isEarlyDeparture: false, earlyDepartureBy: 0, isOvertime: false, overtimeHours: 0,
-//           shift: employee.shiftId || null
-//         };
-        
-//         if (rec) {
-//             Object.assign(record, {
-//                 check_in: rec.check_in ? moment(rec.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : null,
-//                 check_out: rec.check_out ? moment(rec.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : null,
-//                 status: rec.status,
-//                 leave_type: rec.leave_type,
-//                 work_hours: rec.work_hours || 0,
-//                 isLate: rec.isLate || false,
-//                 lateBy: rec.lateBy || 0,
-//                 isEarlyDeparture: rec.isEarlyDeparture || false,
-//                 earlyDepartureBy: rec.earlyDepartureBy || 0,
-//                 isOvertime: rec.isOvertime || false,
-//                 overtimeHours: rec.overtimeHours || 0,
-//             });
-//         }
-        
-//         if (isHoliday && record.status === 'Absent') {
-//             record.status = 'Holiday';
-//         }
-        
-//         if (leave && ['Absent', 'Holiday'].includes(record.status)) {
-//           record.status = leave.type === 'remote' ? 'Remote' : 'Leave';
-//           record.leave_type = leave.type;
-//         }
-        
-//         finalAttendance.push(record);
-//       }
-//       currentDay.add(1, 'day');
-//     }
-
-//     // 6. Totals
-//     const totals = {
-//       totalRecords: finalAttendance.length,
-//       presentDays: finalAttendance.filter(r => r.status === 'Present').length,
-//       incompleteDays: finalAttendance.filter(r => r.status === 'Incomplete').length,
-//       absentDays: finalAttendance.filter(r => r.status === 'Absent').length,
-//       leaveDays: finalAttendance.filter(r => r.status === 'Leave').length,
-//       holidayDays: finalAttendance.filter(r => r.status === 'Holiday').length,
-//       remoteDays: finalAttendance.filter(r => r.status === 'Remote').length,
-//       totalLateMinutes: finalAttendance.reduce((sum, r) => sum + (r.isLate ? r.lateBy : 0), 0),
-//       totalOvertimeHours: finalAttendance.reduce((sum, r) => sum + (r.isOvertime ? r.overtimeHours : 0), 0)
-//     };
-
-//     res.status(200).json({ success: true, data: finalAttendance, totals });
-
-//   } catch (error) {
-//     console.error('Error in getAttendance:', error);
-//     res.status(500).json({ success: false, error: 'Internal Server Error' });
-//   }
-// };
-
 
 exports.getAttendance = async (req, res) => {
   try {
@@ -750,22 +569,22 @@ if (request.managerApproverId.toString() !== req.user.employeeId.toString() ||
       return res.status(400).json({ success: false, error: `Request already ${request.status}` });
     }
 
-    request.status = (status === 'approved') ? 'pending_hr_approval' : 'denied_by_manager';
+    request.status = (status === 'approved') ? 'approved' : 'denied_by_manager';
     request.managerApprovalDate = new Date();
     request.managerComment = managerComment;
     // For HR Approver: find an HR manager in the company
-    if (status === 'approved') {
-      // const hrManager = await Employee.findOne({ companyId: req.user.companyId, role: 'HR Manager' });
-      const hrManager = await Employee.findOne({  role: 'HR Manager' });
-      if (hrManager) {
-        request.hrApproverId = hrManager._id;
-      } else {
-        // Fallback if no specific HR Manager is found, potentially needs a Super Admin
-        const superAdmin = await Employee.findOne({ role: 'Super Admin' });
-        if (superAdmin) request.hrApproverId = superAdmin._id;
-        else console.warn('⚠️ No HR Manager or Super Admin found for HR approval process.');
-      }
-    }
+    // if (status === 'approved') {
+    //   // const hrManager = await Employee.findOne({ companyId: req.user.companyId, role: 'HR Manager' });
+    //   const hrManager = await Employee.findOne({  role: 'HR Manager' });
+    //   if (hrManager) {
+    //     request.hrApproverId = hrManager._id;
+    //   } else {
+    //     // Fallback if no specific HR Manager is found, potentially needs a Super Admin
+    //     const superAdmin = await Employee.findOne({ role: 'Super Admin' });
+    //     if (superAdmin) request.hrApproverId = superAdmin._id;
+    //     else console.warn('⚠️ No HR Manager or Super Admin found for HR approval process.');
+    //   }
+    // }
 
     await request.save();
     res.status(200).json({ success: true, data: request });
@@ -775,87 +594,127 @@ if (request.managerApproverId.toString() !== req.user.employeeId.toString() ||
   }
 };
 
-exports.hrReviewAdjustment = async (req, res) => {
-  try {
-    const { id } = req.params; // Request ID
-    const { status, hrComment } = req.body; // 'approved' or 'denied_by_hr'
+// exports.hrReviewAdjustment = async (req, res) => {
+//   try {
+//     const { id } = req.params; // Request ID
+//     const { status, hrComment } = req.body; // 'approved' or 'denied_by_hr'
 
-    if (!['approved', 'denied_by_hr'].includes(status)) {
-      return res.status(400).json({ success: false, error: 'Invalid status for HR review' });
-    }
+//     if (!['approved', 'denied_by_hr'].includes(status)) {
+//       return res.status(400).json({ success: false, error: 'Invalid status for HR review' });
+//     }
 
-    const request = await AttendanceAdjustmentRequest.findById(id);
-    if (!request) {
-      return res.status(404).json({ success: false, error: 'Adjustment request not found' });
-    }
+//     const request = await AttendanceAdjustmentRequest.findById(id);
+//     if (!request) {
+//       return res.status(404).json({ success: false, error: 'Adjustment request not found' });
+//     }
 
-    // Ensure HR user is authorized (either the assigned HR, or any HR if hrApproverId is general)
-    // For simplicity, for now, any HR Manager in the company can approve/deny if hrApproverId isn't set
-    const isAuthorizedHR = (request.hrApproverId && request.hrApproverId.toString() === req.user.employeeId.toString()) ||
-                           req.user.role === 'HR Manager' || req.user.role === 'Super Admin' || req.user.role === 'Company Admin';
+//     // Ensure HR user is authorized (either the assigned HR, or any HR if hrApproverId is general)
+//     // For simplicity, for now, any HR Manager in the company can approve/deny if hrApproverId isn't set
+//     const isAuthorizedHR = (request.hrApproverId && request.hrApproverId.toString() === req.user.employeeId.toString()) ||
+//                            req.user.role === 'HR Manager' || req.user.role === 'Super Admin' || req.user.role === 'Company Admin';
     
-    if (!isAuthorizedHR) {
-      return res.status(403).json({ success: false, error: 'You are not authorized to review this request' });
-    }
-    if (request.status !== 'pending_hr_approval') {
-      return res.status(400).json({ success: false, error: `Request already ${request.status}` });
-    }
+//     if (!isAuthorizedHR) {
+//       return res.status(403).json({ success: false, error: 'You are not authorized to review this request' });
+//     }
+//     if (request.status !== 'pending_hr_approval') {
+//       return res.status(400).json({ success: false, error: `Request already ${request.status}` });
+//     }
 
-    request.status = status;
-    request.hrApprovalDate = new Date();
-    request.hrComment = hrComment;
+//     request.status = status;
+//     request.hrApprovalDate = new Date();
+//     request.hrComment = hrComment;
 
-    if (status === 'approved') {
-      // Update the actual EmployeesAttendance record
-      const attendance = await EmployeesAttendance.findOneAndUpdate(
-        { employeeId: request.employeeId, date: request.attendanceDate },
-        { 
-          $set: {
-            check_in: request.proposedCheckIn,
-            check_out: request.proposedCheckOut,
-            // Recalculate work_hours if both are present
-            work_hours: (request.proposedCheckIn && request.proposedCheckOut)
-                          ? (moment(request.proposedCheckOut).diff(moment(request.proposedCheckIn), 'minutes') / 60) 
-                          : 0,
-            status: (request.proposedCheckIn || request.proposedCheckOut) ? 'Present' : 'Absent', // Assuming any check-in implies present
-          }
-        },
-        { upsert: true, new: true }
-      );
-      console.log(`✅ Attendance record updated for employee ${request.employeeId} on ${moment(request.attendanceDate).format('YYYY-MM-DD')}`);
-    }
+//     if (status === 'approved') {
+//       // Update the actual EmployeesAttendance record
+//       const attendance = await EmployeesAttendance.findOneAndUpdate(
+//         { employeeId: request.employeeId, date: request.attendanceDate },
+//         { 
+//           $set: {
+//             check_in: request.proposedCheckIn,
+//             check_out: request.proposedCheckOut,
+//             // Recalculate work_hours if both are present
+//             work_hours: (request.proposedCheckIn && request.proposedCheckOut)
+//                           ? (moment(request.proposedCheckOut).diff(moment(request.proposedCheckIn), 'minutes') / 60) 
+//                           : 0,
+//             status: (request.proposedCheckIn || request.proposedCheckOut) ? 'Present' : 'Absent', // Assuming any check-in implies present
+//           }
+//         },
+//         { upsert: true, new: true }
+//       );
+//       console.log(`✅ Attendance record updated for employee ${request.employeeId} on ${moment(request.attendanceDate).format('YYYY-MM-DD')}`);
+//     }
 
-    await request.save();
-    res.status(200).json({ success: true, data: request });
-  } catch (error) {
-    console.error(`❌ Error reviewing adjustment request by HR: ${error.message}`);
-    res.status(400).json({ success: false, error: error.message });
-  }
-};
+//     await request.save();
+//     res.status(200).json({ success: true, data: request });
+//   } catch (error) {
+//     console.error(`❌ Error reviewing adjustment request by HR: ${error.message}`);
+//     res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
+// exports.getAdjustmentRequests = async (req, res) => {
+//   try {
+//     let query = { companyId: req.user.companyId };
+
+//     if (req.user.role === 'Employee') {
+//       query.employeeId = req.user.employeeId;
+//     } else if (req.user.role === 'Manager') {
+//       query.managerApproverId = req.user.employeeId;
+//       // Managers can see all requests where they are the approver, regardless of status
+//     } else if (req.user.role === 'HR Manager') {
+//       // HR Managers can see all requests
+//     } else if (req.user.role === 'Super Admin') {
+//       delete query.companyId; // Super Admin sees all across all companies
+//     }
+
+//     const requests = await AttendanceAdjustmentRequest.find(query)
+//       .populate('employeeId', 'fullName newEmployeeCode')
+//       .populate('managerApproverId', 'fullName');
+
+//     res.status(200).json({ success: true, data: requests });
+//   } catch (error) {
+//     console.error(`❌ Error getting adjustment requests: ${error.message}`);
+//     res.status(400).json({ success: false, error: error.message });
+//   }
+// };
+
+
+// controllers/attendanceAdjustmentController.js (or wherever you have it)
 
 exports.getAdjustmentRequests = async (req, res) => {
   try {
-    let query = { companyId: req.user.companyId };
+    let query = {};
 
+    // Role-based visibility
     if (req.user.role === 'Employee') {
+      // Employee sees only his/her own requests
       query.employeeId = req.user.employeeId;
-    } else if (req.user.role === 'Manager') {
+    } 
+    else if (req.user.role === 'Manager') {
+      // Manager sees only requests where he/she is the approver
       query.managerApproverId = req.user.employeeId;
-      query.status = 'pending_manager_approval'; // Managers only see their pending approvals
-    } else if (req.user.role === 'HR Manager') {
-      query.status = 'pending_hr_approval'; // HR Managers only see requests pending HR approval
-    } else if (req.user.role === 'Super Admin') {
-      delete query.companyId; // Super Admin sees all across all companies
+    } 
+    else if (req.user.role === 'HR Manager') {
+      // HR Manager sees ALL requests across the system
+      // No filter → query remains {}
+    } 
+    else if (['Super Admin', 'Company Admin', 'C-Level Executive'].includes(req.user.role)) {
+      // Admins / C-Level see everything
+      // No filter → query remains {}
+    } 
+    else {
+      // Fallback: deny access for any unexpected role
+      return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
     const requests = await AttendanceAdjustmentRequest.find(query)
       .populate('employeeId', 'fullName newEmployeeCode')
       .populate('managerApproverId', 'fullName')
-      .populate('hrApproverId', 'fullName');
+      .sort({ createdAt: -1 }); // newest first
 
     res.status(200).json({ success: true, data: requests });
   } catch (error) {
-    console.error(`❌ Error getting adjustment requests: ${error.message}`);
-    res.status(400).json({ success: false, error: error.message });
+    console.error(`Error fetching adjustment requests: ${error.message}`);
+    res.status(500).json({ success: false, error: 'Server error' });
   }
 };

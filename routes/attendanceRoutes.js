@@ -18,11 +18,11 @@ router.patch('/adjustments/:id/manager-review',
   attendanceController.managerReviewAdjustment
 );
 
-router.patch('/adjustments/:id/hr-review',
-  authenticate('jwt', { session: false }),
-  restrictTo('HR Manager', 'Super Admin', 'Company Admin', 'C-Level Executive'),
-  attendanceController.hrReviewAdjustment
-);
+// router.patch('/adjustments/:id/hr-review',
+//   authenticate('jwt', { session: false }),
+//   restrictTo('HR Manager', 'Super Admin', 'Company Admin', 'C-Level Executive'),
+//   attendanceController.hrReviewAdjustment
+// );
 
 router.get('/adjustments',
   authenticate('jwt', { session: false }),

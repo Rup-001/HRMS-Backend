@@ -25,9 +25,9 @@ const attendanceAdjustmentRequestSchema = new mongoose.Schema({
   managerApproverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
   managerApprovalDate: { type: Date },
   managerComment: { type: String },
-  hrApproverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, // Could be a specific HR employee or just a placeholder
-  hrApprovalDate: { type: Date },
-  hrComment: { type: String },
+  // hrApproverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, // Could be a specific HR employee or just a placeholder
+  // hrApprovalDate: { type: Date },
+  // hrComment: { type: String },
 }, { timestamps: true });
 
 module.exports = mongoose.models.AttendanceAdjustmentRequest || mongoose.model('AttendanceAdjustmentRequest', attendanceAdjustmentRequestSchema);
