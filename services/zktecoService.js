@@ -272,148 +272,106 @@ class ZKService {
 //     throw error;
 //   }
 // }
-
-// 🔹 Sync logs
+// Sync logs – FINAL WORKING VERSION (Nov 2025)
 async syncDeviceLogs() {
   try {
     await this.connect();
     const deviceId = process.env.ZKTECO_DEVICE_IP;
 
-    // Get last synced timestamp
     const lastSync = await LastSync.findOne({ deviceId });
     const lastSyncTimestamp = lastSync ? lastSync.lastSyncTimestamp : new Date(0);
-    console.log(`🔍 Fetching logs since ${moment(lastSyncTimestamp).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')} (Dhaka)`);
 
     const logs = (await this.device.getAttendances()).data || [];
-    console.log(`📡 Received ${logs.length} total logs from device`);
-    console.log('📜 Raw logs (first 5):', JSON.stringify(logs.slice(0, 5), null, 2));
 
-    if (!Array.isArray(logs)) {
-      throw new Error('Invalid log data from device');
-    }
+    if (!Array.isArray(logs)) throw new Error('Invalid data from device');
 
-    // === FIX 1: Parse ZKTeco time as LOCAL Dhaka time ===
+    // CORRECT WAY: treat device time as Asia/Dhaka
     const newLogs = logs
-      .filter(l => {
-        if (!l || !l.user_id || !l.record_time) return false;
-        try {
-          const parsed = moment.tz(l.record_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka', true);
-          if (!parsed.isValid()) return false;
-          return parsed.toDate() > lastSyncTimestamp;
-        } catch {
-          return false;
-        }
-      })
+      .filter(l => l?.user_id && l?.record_time)
       .map(l => {
-        const localTime = moment.tz(l.record_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka').toDate();
-        return {
+        const dhakaTime = moment.tz(l.record_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka').toDate();
+        return dhakaTime > lastSyncTimestamp ? {
           user_id: l.user_id,
-          timestamp: localTime,
+          timestamp: dhakaTime,
           type: l.type ?? 0,
           state: l.state ?? 0,
           ip: l.ip ?? ''
-        };
-      });
+        } : null;
+      })
+      .filter(Boolean);
 
-    console.log(`✅ Filtered ${newLogs.length} new logs`);
+    console.log(`Filtered ${newLogs.length} new logs`);
 
-    let synced = 0;
-    let latestTimestamp = lastSyncTimestamp;
-
-    // Save to Log model
+    // Save raw logs
     if (newLogs.length > 0) {
-      const bulkOps = newLogs.map(log => ({
+      const bulk = newLogs.map(log => ({
         updateOne: {
           filter: { user_id: log.user_id, timestamp: log.timestamp },
-          update: { $set: log },
+          update: { $setOnInsert: log },
           upsert: true
         }
       }));
-      const result = await Log.bulkWrite(bulkOps);
-      synced = result.upsertedCount + result.modifiedCount;
-      console.log(`✅ Saved ${synced} logs to Log model`);
+      await Log.bulkWrite(bulk);
     }
 
-    // === FIX 2: Process Attendance in Dhaka Time ===
+    let latest = lastSyncTimestamp;
+
+    // Process attendance
     for (const log of newLogs) {
       const employee = await Employee.findOne({ deviceUserId: log.user_id });
-      if (!employee) {
-        console.warn(`⚠️ Employee not found for deviceUserId: ${log.user_id}`);
-        continue;
-      }
+      if (!employee) continue;
 
-      const logLocalTime = log.timestamp; // Already correct Dhaka time
-      const attendanceDateDhaka = moment.tz(logLocalTime, 'Asia/Dhaka').startOf('day').toDate();
+      const logTime = log.timestamp; // already correct Dhaka time
+      const dayStartDhaka = moment.tz(logTime, 'Asia/Dhaka').startOf('day').toDate();
 
-      let attendance = await EmployeesAttendance.findOne({
+      let att = await EmployeesAttendance.findOne({
         employeeId: employee._id,
-        date: attendanceDateDhaka
+        date: dayStartDhaka
       });
 
-      if (attendance) {
-        // Update earliest check-in, latest check-out
-        if (!attendance.check_in || logLocalTime < attendance.check_in) {
-          attendance.check_in = logLocalTime;
-        }
-        if (!attendance.check_out || logLocalTime > attendance.check_out) {
-          attendance.check_out = logLocalTime;
-        }
-      } else {
-        // Create new record
-        attendance = new EmployeesAttendance({
+      if (!att) {
+        att = new EmployeesAttendance({
           companyId: employee.companyId,
           employeeId: employee._id,
-          date: attendanceDateDhaka,
-          check_in: logLocalTime,
-          check_out: null,
-          status: 'Incomplete',
-          work_hours: 0
+          date: dayStartDhaka,
+          check_in: logTime,
+          status: 'Incomplete'
         });
-      }
-
-      // Recalculate work hours
-      if (attendance.check_in && attendance.check_out) {
-        const hours = (attendance.check_out - attendance.check_in) / (1000 * 60 * 60);
-        attendance.work_hours = Math.round(hours * 100) / 100;
-        attendance.status = hours >= 0.1 ? 'Present' : 'Incomplete'; // Avoid floating point 0
-      } else if (attendance.check_in) {
-        attendance.status = 'Incomplete';
       } else {
-        attendance.status = 'Absent';
+        if (!att.check_in || logTime < att.check_in) att.check_in = logTime;
+        if (!att.check_out || logTime > att.check_out) att.check_out = logTime;
       }
 
-      await attendance.save();
-      console.log(`✅ Attendance updated: ${employee.fullName || employee._id} on ${moment(attendanceDateDhaka).format('YYYY-MM-DD')} | In: ${attendance.check_in ? moment(attendance.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : '-'} | Out: ${attendance.check_out ? moment(attendance.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : '-'}`);
-
-      if (logLocalTime > latestTimestamp) {
-        latestTimestamp = logLocalTime;
+      // recalculate hours
+      if (att.check_in && att.check_out) {
+        const hrs = (att.check_out - att.check_in) / (1000 * 60 * 60);
+        att.work_hours = Math.round(hrs * 100) / 100;
+        att.status = hrs >= 4 ? 'Present' : 'Incomplete';
       }
+
+      await att.save();
+
+      if (logTime > latest) latest = logTime;
     }
 
-    // Update LastSync
-    if (synced > 0) {
+    // update last sync time
+    if (newLogs.length > 0) {
       await LastSync.updateOne(
         { deviceId },
-        { $set: { lastSyncTimestamp: latestTimestamp } },
+        { $set: { lastSyncTimestamp: latest } },
         { upsert: true }
       );
-      console.log(`✅ LastSync updated to ${moment(latestTimestamp).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss')}`);
     }
 
     await this.disconnect();
+    return { success: true, newLogs: newLogs.length };
 
-    const totalLogs = await Log.countDocuments();
-    const attendanceCount = await EmployeesAttendance.countDocuments();
-    console.log(`✅ Sync completed: ${synced} new logs, ${totalLogs} total logs, ${attendanceCount} attendance records`);
-
-    return { success: true, count: synced, total: totalLogs, attendanceCount };
-  } catch (error) {
-    console.error(`❌ Sync failed:`, error.message);
+  } catch (err) {
     await this.disconnect();
-    throw error;
+    console.error('Sync failed:', err.message);
+    throw err;
   }
 }
-
 async setUser(userid, name) {
   const maxRetries = 3;
   for (let i = 0; i < maxRetries; i++) {
