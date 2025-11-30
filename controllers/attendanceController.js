@@ -7,76 +7,94 @@ const LeaveRequest = require('../models/leaveRequest'); // Import LeaveRequest m
 
 // exports.getAttendance = async (req, res) => {
 //   try {
-//     // 1. Extract and Validate Query Parameters
 //     let { employeeId, startDate, endDate, search } = req.query;
-//     const { companyId } = req.user;
-//     const userRole = req.user.role;
+//     const { companyId, role: userRole, employeeId: userEmployeeId } = req.user;
 
-//     const now = moment.tz('Asia/Dhaka');
-//     const defaultStart = now.clone().startOf('month');
-//     const defaultEnd = now.clone().endOf('month');
+//     // Default to current month in UTC
+//     const now = moment.utc();
+//     const defaultStart = now.clone().startOf('month').startOf('day');
+//     const defaultEnd = now.clone().endOf('month').startOf('day');
 
-//     let start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day') : defaultStart;
-//     let end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day') : defaultEnd;
+//     let start = startDate
+//       ? moment.utc(startDate).startOf('day')
+//       : defaultStart;
 
-//     if (!start.isValid() || !end.isValid()) {
-//       return res.status(400).json({ success: false, error: 'Invalid date format. Use YYYY-MM-DD.' });
+//     let end = endDate
+//       ? moment.utc(endDate).endOf('day')
+//       : defaultEnd;
+
+//     if (!start.isValid() || !end.isValid() || start.isAfter(end)) {
+//       return res.status(400).json({ success: false, error: 'Invalid date range' });
 //     }
-//     if (start.isAfter(end)) {
-//       return res.status(400).json({ success: false, error: 'Start date cannot be after end date.' });
-//     }
 
-//     // 2. Role-based Employee Filtering
-//     let employeeQuery = { companyId };
+//     // Super Admin sees ALL companies
+//     const isSuperAdmin = userRole === 'Super Admin';
+//     const baseCompanyFilter = isSuperAdmin ? {} : { companyId };
+
+//     // Build employee filter
+//     let employeeQuery = { ...baseCompanyFilter };
 //     if (employeeId) employeeQuery._id = employeeId;
-    
+
+//     // Search by name
 //     if (search) {
-//       const searchEmployees = await Employee.find({ 
-//         fullName: { $regex: search, $options: 'i' }, 
-//         companyId 
+//       const matchedEmps = await Employee.find({
+//         ...baseCompanyFilter,
+//         fullName: { $regex: search, $options: 'i' }
 //       }).select('_id');
-//       const searchIds = searchEmployees.map(e => e._id.toString());
-//       if (employeeQuery._id) {
-//           if (!searchIds.includes(employeeQuery._id.toString())) {
-//               return res.status(200).json({ success: true, data: [], totals: {} });
-//           }
-//       } else {
-//         employeeQuery._id = { $in: searchIds };
+
+//       const ids = matchedEmps.map(e => e._id);
+
+//       if (ids.length === 0) {
+//         return res.status(200).json({ success: true, data: [], totals: {} });
 //       }
+
+//       employeeQuery._id = employeeQuery._id
+//         ? { $and: [{ _id: employeeQuery._id }, { _id: { $in: ids } }] }
+//         : { $in: ids };
 //     }
 
+//     // Role-based access
 //     if (userRole === 'Employee') {
-//       employeeQuery._id = req.user.employeeId;
+//       employeeQuery._id = userEmployeeId;
 //     } else if (userRole === 'Manager') {
-//       const managed = await Employee.find({ managerId: req.user.employeeId, companyId }).select('_id');
-//       const allowedIds = [req.user.employeeId.toString(), ...managed.map(m => m._id.toString())];
-      
-//       if (employeeQuery._id) {
-//         if (!allowedIds.includes(employeeQuery._id.toString())) {
-//           return res.status(403).json({ success: false, error: 'Access Denied.' });
-//         }
-//       } else {
-//         employeeQuery._id = { $in: allowedIds };
+//       const managed = await Employee.find({
+//         managerId: userEmployeeId,
+//         ...baseCompanyFilter
+//       }).select('_id');
+
+//       const allowedIds = [userEmployeeId, ...managed.map(m => m._id)];
+
+//       if (employeeQuery._id && !allowedIds.includes(employeeQuery._id)) {
+//         return res.status(403).json({ success: false, error: 'Access denied' });
 //       }
+//       employeeQuery._id = { $in: allowedIds };
 //     }
 
-//     // 3. Fetch Data
-//     const employees = await Employee.find(employeeQuery).populate('shiftId').lean();
+//     const employees = await Employee.find(employeeQuery)
+//       .populate({
+//         path: 'shiftId',
+//         select: 'name startTime endTime workingHours gracePeriod overtimeThreshold'
+//       })
+//       .lean();
+
 //     if (employees.length === 0) {
 //       return res.status(200).json({ success: true, data: [], totals: {} });
 //     }
-//     const employeeIds = employees.map(e => e._id);
-    
-//     const startYear = start.year();
-//     const endYear = end.year();
-//     const years = [];
-//     for (let y = startYear; y <= endYear; y++) {
-//       years.push(y);
-//     }
-//     const holidayCalendars = await HolidayCalendar.find({ companyId, year: { $in: years } }).lean();
-//     const holidays = holidayCalendars.flatMap(cal => cal.holidays);
 
-//     const [rawAttendanceRecords, leaveRequests] = await Promise.all([
+//     const employeeIds = employees.map(e => e._id);
+
+//     // Fetch holidays (Super Admin = all companies)
+//     const years = [];
+//     for (let y = start.year(); y <= end.year(); y++) years.push(y);
+
+//     const holidayCalendars = await HolidayCalendar.find(
+//       isSuperAdmin ? { year: { $in: years } } : { companyId, year: { $in: years } }
+//     ).lean();
+
+//     const holidays = holidayCalendars.flatMap(cal => cal.holidays || []);
+
+//     // Fetch attendance & approved leaves
+//     const [rawAttendance, leaves] = await Promise.all([
 //       EmployeesAttendance.find({
 //         employeeId: { $in: employeeIds },
 //         date: { $gte: start.toDate(), $lte: end.toDate() }
@@ -88,155 +106,194 @@ const LeaveRequest = require('../models/leaveRequest'); // Import LeaveRequest m
 //         endDate: { $gte: start.toDate() }
 //       }).lean()
 //     ]);
-    
-//     // Maps for quick lookup
+
+//     // Build lookup maps using UTC date string (YYYY-MM-DD)
 //     const attendanceMap = new Map();
-//     rawAttendanceRecords.forEach(rec => {
-//       const dateKey = moment(rec.date).tz('Asia/Dhaka').format('YYYY-MM-DD');
+//     rawAttendance.forEach(rec => {
+//       const dateKey = moment.utc(rec.date).format('YYYY-MM-DD');
 //       attendanceMap.set(`${rec.employeeId}_${dateKey}`, rec);
 //     });
 
 //     const leaveMap = new Map();
-//     leaveRequests.forEach(lr => {
-//       let cur = moment(lr.startDate).tz('Asia/Dhaka').startOf('day');
-//       const endLeave = moment(lr.endDate).tz('Asia/Dhaka').endOf('day');
-//       while (cur.isSameOrBefore(endLeave, 'day')) {
-//         leaveMap.set(`${lr.employeeId}_${cur.format('YYYY-MM-DD')}`, lr);
+//     leaves.forEach(leave => {
+//       let cur = moment.utc(leave.startDate).startOf('day');
+//       const endL = moment.utc(leave.endDate).endOf('day');
+//       while (cur <= endL) {
+//         const key = cur.format('YYYY-MM-DD');
+//         leaveMap.set(`${leave.employeeId}_${key}`, leave);
 //         cur.add(1, 'day');
 //       }
 //     });
 
-//     // 4. Build Final Attendance Records
-//     const finalAttendance = [];
-//     let currentDay = start.clone();
-//     while (currentDay.isSameOrBefore(end)) {
-//       const dateStr = currentDay.format('YYYY-MM-DD');
+//     // Generate records for every day in range
+//     const records = [];
+//     let current = start.clone();
+
+//     while (current <= end) {
+//       // const dateStr = current.format('YYYY-MM-DD'); // UTC YYYY-MM-DD
+
+//       // const isHoliday = holidays.some(h => {
+//       //   const hStart = moment.utc(h.startDate).startOf('day');
+//       //   const hEnd = h.endDate ? moment.utc(h.endDate).endOf('day') : hStart;
+//       //   return current.isSameOrBetween(hStart, hEnd, 'day', '[]');
+//             const dateStr = current.format('YYYY-MM-DD'); // UTC YYYY-MM-DD
 
 //       const isHoliday = holidays.some(h => {
-//         const holidayStart = moment(h.startDate).startOf('day');
-//         const holidayEnd = h.endDate ? moment(h.endDate).endOf('day') : holidayStart.clone().endOf('day');
-//         return currentDay.isBetween(holidayStart, holidayEnd, 'day', '[]');
+//         const hStart = moment.utc(h.startDate).startOf('day');
+//         const hEnd = moment.utc(h.endDate || h.startDate).endOf('day');
+//         return current >= hStart && current <= hEnd;
 //       });
+      
 
-//       for (const employee of employees) {
-//         const empIdStr = employee._id.toString();
-//         const key = `${empIdStr}_${dateStr}`;
-//         const rec = attendanceMap.get(key);
+//       for (const emp of employees) {
+//         const key = `${emp._id}_${dateStr}`;
+//         const punch = attendanceMap.get(key);
 //         const leave = leaveMap.get(key);
 
-//         const record = {
-//           employeeId: empIdStr,
-//           employeeCode: employee.newEmployeeCode || employee.employeeCode,
-//           fullName: employee.fullName,
+//         const r = {
+//           employeeId: emp._id.toString(),
+//           employeeCode: emp.newEmployeeCode || emp.employeeCode || '',
+//           fullName: emp.fullName,
 //           date: dateStr,
+//           check_in: null,
+//           check_out: null,
+//           work_hours: 0,
 //           status: 'Absent',
-//           check_in: null, check_out: null, work_hours: 0, leave_type: null,
-//           isLate: false, lateBy: 0, isEarlyDeparture: false, earlyDepartureBy: 0, isOvertime: false, overtimeHours: 0,
-//           shift: employee.shiftId || null
+//           leave_type: null,
+//           isLate: false,
+//           lateBy: 0,
+//           isEarlyDeparture: false,
+//           earlyDepartureBy: 0,
+//           isOvertime: false,
+//           overtimeHours: 0,
+//           shift: emp.shiftId
+//             ? {
+//                 name: emp.shiftId.name,
+//                 startTime: emp.shiftId.startTime,
+//                 endTime: emp.shiftId.endTime,
+//                 workingHours: emp.shiftId.workingHours || 8,
+//                 gracePeriod: emp.shiftId.gracePeriod || 0,
+//                 overtimeThreshold: emp.shiftId.overtimeThreshold || 0,
+//               }
+//             : null
 //         };
-        
-//         if (rec) {
-//             Object.assign(record, {
-//                 check_in: rec.check_in ? moment(rec.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : null,
-//                 check_out: rec.check_out ? moment(rec.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : null,
-//                 status: rec.status,
-//                 leave_type: rec.leave_type,
-//                 work_hours: rec.work_hours || 0,
-//                 isLate: rec.isLate || false,
-//                 lateBy: rec.lateBy || 0,
-//                 isEarlyDeparture: rec.isEarlyDeparture || false,
-//                 earlyDepartureBy: rec.earlyDepartureBy || 0,
-//                 isOvertime: rec.isOvertime || false,
-//                 overtimeHours: rec.overtimeHours || 0,
-//             });
+
+//         if (punch) {
+//           r.check_in = punch.check_in ? moment.utc(punch.check_in).format('HH:mm:ss') : null;
+//           r.check_out = punch.check_out ? moment.utc(punch.check_out).format('HH:mm:ss') : null;
+//           r.status = punch.check_out ? 'Present' : 'Incomplete';
 //         }
-        
-//         if (isHoliday && record.status === 'Absent') {
-//             record.status = 'Holiday';
+
+//         if (isHoliday && r.status === 'Absent') r.status = 'Holiday';
+
+//         if (leave && ['Absent', 'Holiday'].includes(r.status)) {
+//           r.status = leave.type === 'remote' ? 'Remote' : 'Leave';
+//           r.leave_type = leave.type;
 //         }
-        
-//         if (leave && ['Absent', 'Holiday'].includes(record.status)) {
-//           record.status = leave.type === 'remote' ? 'Remote' : 'Leave';
-//           record.leave_type = leave.type;
+
+//         // Late & Overtime calculation (UTC-based)
+//         if (r.check_in && emp.shiftId && !['Holiday', 'Leave', 'Remote'].includes(r.status)) {
+//           const shift = emp.shiftId;
+//           const [sh, sm] = shift.startTime.split(':').map(Number);
+
+//           const scheduledStartUTC = moment.utc(dateStr).set({ hour: sh, minute: sm, second: 0 });
+//           const checkInUTC = moment.utc(`${dateStr} ${r.check_in}`, 'YYYY-MM-DD HH:mm:ss');
+//           const lateThreshold = scheduledStartUTC.clone().add(shift.gracePeriod || 0, 'minutes');
+
+//           if (checkInUTC.isAfter(lateThreshold)) {
+//             r.isLate = true;
+//             r.lateBy = checkInUTC.diff(lateThreshold, 'minutes');
+//           }
+
+//           if (r.check_out) {
+//             const checkOutUTC = moment.utc(`${dateStr} ${r.check_out}`, 'YYYY-MM-DD HH:mm:ss');
+//             const workedMins = checkOutUTC.diff(checkInUTC, 'minutes');
+//             r.work_hours = Number((workedMins / 60).toFixed(2));
+
+//             const expectedMins = (shift.workingHours || 8) * 60 + (shift.overtimeThreshold || 0);
+//             if (workedMins > expectedMins) {
+//               r.isOvertime = true;
+//               r.overtimeHours = Number(((workedMins - expectedMins) / 60).toFixed(2));
+//             }
+//           }
 //         }
-        
-//         finalAttendance.push(record);
+
+//         records.push(r);
 //       }
-//       currentDay.add(1, 'day');
+
+//       current.add(1, 'day');
 //     }
 
-//     // 6. Totals
+//     // Totals
 //     const totals = {
-//       totalRecords: finalAttendance.length,
-//       presentDays: finalAttendance.filter(r => r.status === 'Present').length,
-//       incompleteDays: finalAttendance.filter(r => r.status === 'Incomplete').length,
-//       absentDays: finalAttendance.filter(r => r.status === 'Absent').length,
-//       leaveDays: finalAttendance.filter(r => r.status === 'Leave').length,
-//       holidayDays: finalAttendance.filter(r => r.status === 'Holiday').length,
-//       remoteDays: finalAttendance.filter(r => r.status === 'Remote').length,
-//       totalLateMinutes: finalAttendance.reduce((sum, r) => sum + (r.isLate ? r.lateBy : 0), 0),
-//       totalOvertimeHours: finalAttendance.reduce((sum, r) => sum + (r.isOvertime ? r.overtimeHours : 0), 0)
+//       totalRecords: records.length,
+//       presentDays: records.filter(r => r.status === 'Present').length,
+//       incompleteDays: records.filter(r => r.status === 'Incomplete').length,
+//       absentDays: records.filter(r => r.status === 'Absent').length,
+//       leaveDays: records.filter(r => r.status === 'Leave').length,
+//       holidayDays: records.filter(r => r.status === 'Holiday').length,
+//       remoteDays: records.filter(r => r.status === 'Remote').length,
+//       totalLateMinutes: records.reduce((s, r) => s + r.lateBy, 0),
+//       totalOvertimeHours: Number(records.reduce((s, r) => s + r.overtimeHours, 0).toFixed(2))
 //     };
 
-//     res.status(200).json({ success: true, data: finalAttendance, totals });
+//     return res.json({ success: true, data: records, totals });
 
-//   } catch (error) {
-//     console.error('Error in getAttendance:', error);
-//     res.status(500).json({ success: false, error: 'Internal Server Error' });
+//   } catch (err) {
+//     console.error('getAttendance error:', err);
+//     return res.status(500).json({ success: false, error: 'Server error' });
 //   }
 // };
 
 
 exports.getAttendance = async (req, res) => {
   try {
-    // 1. Extract and Validate Query Parameters
     let { employeeId, startDate, endDate, search } = req.query;
-    const { companyId } = req.user;
-    const userRole = req.user.role;
-    const now = moment.tz('Asia/Dhaka');
-    const defaultStart = now.clone().startOf('month');
-    const defaultEnd = now.clone().endOf('month');
+    const { companyId, role: userRole, employeeId: userEmployeeId } = req.user;
 
-    let start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day') : defaultStart;
-    let end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day') : defaultEnd;
+    const now = moment.utc();
+    const defaultStart = now.clone().startOf('month').startOf('day');
+    const defaultEnd = now.clone().endOf('month').startOf('day');
 
-    if (!start.isValid() || !end.isValid()) {
-      return res.status(400).json({ success: false, error: 'Invalid date format.' });
-    }
-    if (start.isAfter(end)) {
-      return res.status(400).json({ success: false, error: 'Start date cannot be after end date.' });
+    let start = startDate ? moment.utc(startDate).startOf('day') : defaultStart;
+    let end = endDate ? moment.utc(endDate).endOf('day') : defaultEnd;
+
+    if (!start.isValid() || !end.isValid() || start.isAfter(end)) {
+      return res.status(400).json({ success: false, error: 'Invalid date range' });
     }
 
-    // 2. Role-based Employee Filtering
-    let employeeQuery = { companyId };
+    const isSuperAdmin = userRole === 'Super Admin';
+    const baseCompanyFilter = isSuperAdmin ? {} : { companyId };
+
+    let employeeQuery = { ...baseCompanyFilter };
     if (employeeId) employeeQuery._id = employeeId;
 
     if (search) {
-      const searchEmployees = await Employee.find({
-        fullName: { $regex: search, $options: 'i' },
-        companyId
+      const matched = await Employee.find({
+        ...baseCompanyFilter,
+        fullName: { $regex: search, $options: 'i' }
       }).select('_id');
-      const searchIds = searchEmployees.map(e => e._id.toString());
-
-      if (employeeQuery._id && !searchIds.includes(employeeQuery._id.toString())) {
-        return res.status(200).json({ success: true, data: [], totals: {} });
-      }
-      if (!employeeQuery._id) employeeQuery._id = { $in: searchIds };
+      const ids = matched.map(e => e._id);
+      if (ids.length === 0) return res.json({ success: true, data: [], totals: {} });
+      employeeQuery._id = employeeQuery._id
+        ? { $and: [{ _id: employeeQuery._id }, { _id: { $in: ids } }] }
+        : { $in: ids };
     }
 
     if (userRole === 'Employee') {
-      employeeQuery._id = req.user.employeeId;
+      employeeQuery._id = userEmployeeId;
     } else if (userRole === 'Manager') {
-      const managed = await Employee.find({ managerId: req.user.employeeId, companyId }).select('_id');
-      const allowedIds = [req.user.employeeId.toString(), ...managed.map(m => m._id.toString())];
-
-      if (employeeQuery._id && !allowedIds.includes(employeeQuery._id.toString())) {
-        return res.status(403).json({ success: false, error: 'Access Denied.' });
+      const managed = await Employee.find({
+        managerId: userEmployeeId,
+        ...baseCompanyFilter
+      }).select('_id');
+      const allowed = [userEmployeeId, ...managed.map(m => m._id)];
+      if (employeeQuery._id && !allowed.includes(employeeQuery._id)) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
       }
-      if (!employeeQuery._id) employeeQuery._id = { $in: allowedIds };
+      employeeQuery._id = { $in: allowed };
     }
 
-    // 3. Fetch Employees with Shift
     const employees = await Employee.find(employeeQuery)
       .populate({
         path: 'shiftId',
@@ -245,20 +302,21 @@ exports.getAttendance = async (req, res) => {
       .lean();
 
     if (employees.length === 0) {
-      return res.status(200).json({ success: true, data: [], totals: {} });
+      return res.json({ success: true, data: [], totals: {} });
     }
 
     const employeeIds = employees.map(e => e._id);
 
-    // 4. Fetch Holidays
     const years = [];
     for (let y = start.year(); y <= end.year(); y++) years.push(y);
 
-    const holidayCalendars = await HolidayCalendar.find({ companyId, year: { $in: years } }).lean();
+    const holidayCalendars = await HolidayCalendar.find(
+      isSuperAdmin ? { year: { $in: years } } : { companyId, year: { $in: years } }
+    ).lean();
+
     const holidays = holidayCalendars.flatMap(cal => cal.holidays || []);
 
-    // 5. Fetch Attendance & Leaves
-    const [rawAttendanceRecords, leaveRequests] = await Promise.all([
+    const [rawAttendance, leaves] = await Promise.all([
       EmployeesAttendance.find({
         employeeId: { $in: employeeIds },
         date: { $gte: start.toDate(), $lte: end.toDate() }
@@ -271,50 +329,43 @@ exports.getAttendance = async (req, res) => {
       }).lean()
     ]);
 
-    // Maps with SAFE UTC → Dhaka conversion
     const attendanceMap = new Map();
-    rawAttendanceRecords.forEach(rec => {
-      const dateKey = moment.utc(rec.date).tz('Asia/Dhaka').format('YYYY-MM-DD');
-      attendanceMap.set(`${rec.employeeId}_${dateKey}`, rec);
+    rawAttendance.forEach(rec => {
+      const key = moment.utc(rec.date).format('YYYY-MM-DD');
+      attendanceMap.set(`${rec.employeeId}_${key}`, rec);
     });
 
     const leaveMap = new Map();
-    leaveRequests.forEach(lr => {
-      let cur = moment.utc(lr.startDate).tz('Asia/Dhaka').startOf('day');
-      const endLeave = moment.utc(lr.endDate).tz('Asia/Dhaka').endOf('day');
-      while (cur.isSameOrBefore(endLeave, 'day')) {
-        const dateKey = cur.format('YYYY-MM-DD');
-        leaveMap.set(`${lr.employeeId}_${dateKey}`, lr);
+    leaves.forEach(leave => {
+      let cur = moment.utc(leave.startDate).startOf('day');
+      const endL = moment.utc(leave.endDate).endOf('day');
+      while (cur <= endL) {
+        leaveMap.set(`${leave.employeeId}_${cur.format('YYYY-MM-DD')}`, leave);
         cur.add(1, 'day');
       }
     });
 
-    // 6. Build Final Attendance Records
-    const finalAttendance = [];
-    let currentDay = start.clone();
+    const records = [];
+    let current = start.clone();
 
-    while (currentDay.isSameOrBefore(end)) {
-      const dateStr = currentDay.format('YYYY-MM-DD');
+    while (current <= end) {
+      const dateStr = current.format('YYYY-MM-DD');
 
-      // Check if it's a holiday
       const isHoliday = holidays.some(h => {
-        const hStart = moment.utc(h.startDate).tz('Asia/Dhaka').startOf('day');
-        const hEnd = h.endDate
-          ? moment.utc(h.endDate).tz('Asia/Dhaka').endOf('day')
-          : hStart.clone();
-        return currentDay.isBetween(hStart, hEnd, 'day', '[]');
+        const hStart = moment.utc(h.startDate).startOf('day');
+        const hEnd = moment.utc(h.endDate || h.startDate).endOf('day');
+        return current >= hStart && current <= hEnd;
       });
 
-      for (const employee of employees) {
-        const empIdStr = employee._id.toString();
-        const key = `${empIdStr}_${dateStr}`;
-        const rec = attendanceMap.get(key);
+      for (const emp of employees) {
+        const key = `${emp._id}_${dateStr}`;
+        const punch = attendanceMap.get(key);
         const leave = leaveMap.get(key);
 
-        const record = {
-          employeeId: empIdStr,
-          employeeCode: employee.newEmployeeCode || employee.employeeCode,
-          fullName: employee.fullName,
+        const r = {
+          employeeId: emp._id.toString(),
+          employeeCode: emp.newEmployeeCode || emp.employeeCode || '',
+          fullName: emp.fullName,
           date: dateStr,
           check_in: null,
           check_out: null,
@@ -327,87 +378,99 @@ exports.getAttendance = async (req, res) => {
           earlyDepartureBy: 0,
           isOvertime: false,
           overtimeHours: 0,
-          shift: employee.shiftId ? {
-            name: employee.shiftId.name,
-            startTime: employee.shiftId.startTime,
-            endTime: employee.shiftId.endTime,
-            workingHours: employee.shiftId.workingHours || 8,
-            gracePeriod: employee.shiftId.gracePeriod || 0,
-            overtimeThreshold: employee.shiftId.overtimeThreshold || 0,
+          shift: emp.shiftId ? {
+            name: emp.shiftId.name,
+            startTime: emp.shiftId.startTime,
+            endTime: emp.shiftId.endTime,
+            workingHours: emp.shiftId.workingHours || 8,
+            gracePeriod: emp.shiftId.gracePeriod || 0,
+            overtimeThreshold: emp.shiftId.overtimeThreshold || 0,
           } : null
         };
 
-        // Apply punch data
-        if (rec) {
-          record.check_in = rec.check_in ? moment.utc(rec.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : null;
-          record.check_out = rec.check_out ? moment.utc(rec.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : null;
-          record.status = rec.check_out ? 'Present' : 'Incomplete';
+        // FIXED LINE — was missing parentheses!
+        if (punch) {
+          r.check_in = punch.check_in ? moment.utc(punch.check_in).format('HH:mm:ss') : null;
+          r.check_out = punch.check_out ? moment.utc(punch.check_out).format('HH:mm:ss') : null;
+          r.status = punch.check_out ? 'Present' : 'Incomplete';
         }
 
-        // Holiday override
-        if (isHoliday && record.status === 'Absent') {
-          record.status = 'Holiday';
+        if (isHoliday && r.status === 'Absent') r.status = 'Holiday';
+        if (leave && ['Absent', 'Holiday'].includes(r.status)) {
+          r.status = leave.type === 'remote' ? 'Remote' : 'Leave';
+          r.leave_type = leave.type;
         }
 
-        // Leave override
-        if (leave && ['Absent', 'Holiday'].includes(record.status)) {
-          record.status = leave.type === 'remote' ? 'Remote' : 'Leave';
-          record.leave_type = leave.type;
-        }
+        // FINAL CORRECT LATE & OVERTIME — ALL IN DHAKA TIME
+        if (r.check_in && emp.shiftId && !['Holiday', 'Leave', 'Remote'].includes(r.status)) {
+          const shift = emp.shiftId;
 
-        // Calculate Late & Overtime (only if punched and not on leave/holiday)
-        if (record.check_in && employee.shiftId && !['Holiday', 'Leave', 'Remote'].includes(record.status)) {
-          const shift = employee.shiftId;
-          const checkInMoment = moment.tz(`${dateStr} ${record.check_in}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka');
-          const [sh, sm] = shift.startTime.split(':').map(Number);
-          const scheduledStart = moment.tz(dateStr, 'Asia/Dhaka').set({ hour: sh, minute: sm, second: 0 });
+          const shiftStart = moment.tz(`${dateStr} ${shift.startTime}`, 'YYYY-MM-DD HH:mm', 'Asia/Dhaka');
+          const lateThreshold = shiftStart.clone().add(shift.gracePeriod || 0, 'minutes');
+          const checkIn = moment.tz(`${dateStr} ${r.check_in}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka');
 
-          const lateThreshold = scheduledStart.clone().add(shift.gracePeriod || 0, 'minutes');
-
-          if (checkInMoment.isAfter(lateThreshold)) {
-            record.isLate = true;
-            record.lateBy = checkInMoment.diff(lateThreshold, 'minutes');
+          if (checkIn.isAfter(lateThreshold)) {
+            r.isLate = true;
+            r.lateBy = checkIn.diff(lateThreshold, 'minutes'); // Now correct (e.g., 84)
           }
 
-          if (record.check_out) {
-            const checkOutMoment = moment.tz(`${dateStr} ${record.check_out}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka');
-            const workMinutes = checkOutMoment.diff(checkInMoment, 'minutes');
-            record.work_hours = Number((workMinutes / 60).toFixed(2));
+          if (r.check_out) {
+            const checkOut = moment.tz(`${dateStr} ${r.check_out}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka');
+            const workedMins = checkOut.diff(checkIn, 'minutes');
+            r.work_hours = Number((workedMins / 60).toFixed(2));
 
             const expectedMins = (shift.workingHours || 8) * 60 + (shift.overtimeThreshold || 0);
-            if (workMinutes > expectedMins) {
-              record.isOvertime = true;
-              record.overtimeHours = Number(((workMinutes - expectedMins) / 60).toFixed(2));
+            if (workedMins > expectedMins) {
+              r.isOvertime = true;
+              r.overtimeHours = Number(((workedMins - expectedMins) / 60).toFixed(2));
             }
           }
         }
 
-        finalAttendance.push(record);
+        records.push(r);
       }
-
-      currentDay.add(1, 'day');
+      current.add(1, 'day');
     }
 
-    // 7. Calculate Totals
     const totals = {
-      totalRecords: finalAttendance.length,
-      presentDays: finalAttendance.filter(r => r.status === 'Present').length,
-      incompleteDays: finalAttendance.filter(r => r.status === 'Incomplete').length,
-      absentDays: finalAttendance.filter(r => r.status === 'Absent').length,
-      leaveDays: finalAttendance.filter(r => r.status === 'Leave').length,
-      holidayDays: finalAttendance.filter(r => r.status === 'Holiday').length,
-      remoteDays: finalAttendance.filter(r => r.status === 'Remote').length,
-      totalLateMinutes: finalAttendance.reduce((sum, r) => sum + (r.isLate ? r.lateBy : 0), 0),
-      totalOvertimeHours: finalAttendance.reduce((sum, r) => sum + r.overtimeHours, 0).toFixed(2)
+      totalRecords: records.length,
+      presentDays: records.filter(r => r.status === 'Present').length,
+      incompleteDays: records.filter(r => r.status === 'Incomplete').length,
+      absentDays: records.filter(r => r.status === 'Absent').length,
+      leaveDays: records.filter(r => r.status === 'Leave').length,
+      holidayDays: records.filter(r => r.status === 'Holiday').length,
+      remoteDays: records.filter(r => r.status === 'Remote').length,
+      totalLateMinutes: records.reduce((s, r) => s + r.lateBy, 0),
+      totalOvertimeHours: Number(records.reduce((s, r) => s + r.overtimeHours, 0).toFixed(2))
     };
 
-    res.status(200).json({ success: true, data: finalAttendance, totals });
+    res.json({ success: true, data: records, totals });
 
-  } catch (error) {
-    console.error('Error in getAttendance:', error);
-    res.status(500).json({ success: false, error: 'Server Error' });
+  } catch (err) {
+    console.error('getAttendance error:', err);
+    res.status(500).json({ success: false, error: 'Server error' });
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -497,7 +560,9 @@ if (!manager || !['Manager', 'C-Level Executive', 'HR Manager', 'Company Admin',
   return res.status(400).json({ success: false, error: 'No valid manager assigned for approval' });
 }
 
-    const targetDate = moment.utc(attendanceDate, 'YYYY-MM-DD').startOf('day').toDate();
+    // const targetDate = moment.utc(attendanceDate, 'YYYY-MM-DD').startOf('day').toDate();
+    const targetDate = moment.tz(attendanceDate, 'YYYY-MM-DD', 'Asia/Dhaka').startOf('day').toDate();
+
 
     const existingRequest = await AttendanceAdjustmentRequest.findOne({
       employeeId: employee._id,
@@ -522,8 +587,10 @@ if (!manager || !['Manager', 'C-Level Executive', 'HR Manager', 'Company Admin',
       attendanceDate: targetDate,
       originalCheckIn,
       originalCheckOut,
-      proposedCheckIn: proposedCheckIn ? moment.utc(proposedCheckIn).toDate() : null,
-      proposedCheckOut: proposedCheckOut ? moment.utc(proposedCheckOut).toDate() : null,
+      // proposedCheckIn: proposedCheckIn ? moment.utc(proposedCheckIn).toDate() : null,
+      // proposedCheckOut: proposedCheckOut ? moment.utc(proposedCheckOut).toDate() : null,
+      proposedCheckIn: proposedCheckIn ? moment.tz(proposedCheckIn, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka').toDate() : null,
+      proposedCheckOut: proposedCheckOut ? moment.tz(proposedCheckOut, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka').toDate() : null,
       reason,
       managerApproverId: employee.managerId,
     });
