@@ -193,7 +193,6 @@ exports.getAttendance = async (req, res) => {
     let { employeeId, startDate, endDate, search } = req.query;
     const { companyId } = req.user;
     const userRole = req.user.role;
-
     const now = moment.tz('Asia/Dhaka');
     const defaultStart = now.clone().startOf('month');
     const defaultEnd = now.clone().endOf('month');
@@ -218,6 +217,7 @@ exports.getAttendance = async (req, res) => {
         companyId
       }).select('_id');
       const searchIds = searchEmployees.map(e => e._id.toString());
+
       if (employeeQuery._id && !searchIds.includes(employeeQuery._id.toString())) {
         return res.status(200).json({ success: true, data: [], totals: {} });
       }
@@ -229,13 +229,14 @@ exports.getAttendance = async (req, res) => {
     } else if (userRole === 'Manager') {
       const managed = await Employee.find({ managerId: req.user.employeeId, companyId }).select('_id');
       const allowedIds = [req.user.employeeId.toString(), ...managed.map(m => m._id.toString())];
+
       if (employeeQuery._id && !allowedIds.includes(employeeQuery._id.toString())) {
         return res.status(403).json({ success: false, error: 'Access Denied.' });
       }
       if (!employeeQuery._id) employeeQuery._id = { $in: allowedIds };
     }
 
-    // 3. Fetch Data
+    // 3. Fetch Employees with Shift
     const employees = await Employee.find(employeeQuery)
       .populate({
         path: 'shiftId',
@@ -249,14 +250,14 @@ exports.getAttendance = async (req, res) => {
 
     const employeeIds = employees.map(e => e._id);
 
-    const startYear = start.year();
-    const endYear = end.year();
+    // 4. Fetch Holidays
     const years = [];
-    for (let y = startYear; y <= endYear; y++) years.push(y);
+    for (let y = start.year(); y <= end.year(); y++) years.push(y);
 
     const holidayCalendars = await HolidayCalendar.find({ companyId, year: { $in: years } }).lean();
-    const holidays = holidayCalendars.flatMap(cal => cal.holidays);
+    const holidays = holidayCalendars.flatMap(cal => cal.holidays || []);
 
+    // 5. Fetch Attendance & Leaves
     const [rawAttendanceRecords, leaveRequests] = await Promise.all([
       EmployeesAttendance.find({
         employeeId: { $in: employeeIds },
@@ -270,33 +271,37 @@ exports.getAttendance = async (req, res) => {
       }).lean()
     ]);
 
-    // Maps
+    // Maps with SAFE UTC → Dhaka conversion
     const attendanceMap = new Map();
     rawAttendanceRecords.forEach(rec => {
-      const dateKey = moment(rec.date).tz('Asia/Dhaka').format('YYYY-MM-DD');
+      const dateKey = moment.utc(rec.date).tz('Asia/Dhaka').format('YYYY-MM-DD');
       attendanceMap.set(`${rec.employeeId}_${dateKey}`, rec);
     });
 
     const leaveMap = new Map();
     leaveRequests.forEach(lr => {
-      let cur = moment(lr.startDate).tz('Asia/Dhaka').startOf('day');
-      const endLeave = moment(lr.endDate).tz('Asia/Dhaka').endOf('day');
+      let cur = moment.utc(lr.startDate).tz('Asia/Dhaka').startOf('day');
+      const endLeave = moment.utc(lr.endDate).tz('Asia/Dhaka').endOf('day');
       while (cur.isSameOrBefore(endLeave, 'day')) {
-        leaveMap.set(`${lr.employeeId}_${cur.format('YYYY-MM-DD')}`, lr);
+        const dateKey = cur.format('YYYY-MM-DD');
+        leaveMap.set(`${lr.employeeId}_${dateKey}`, lr);
         cur.add(1, 'day');
       }
     });
 
-    // 4. Build Final Records
+    // 6. Build Final Attendance Records
     const finalAttendance = [];
     let currentDay = start.clone();
 
     while (currentDay.isSameOrBefore(end)) {
       const dateStr = currentDay.format('YYYY-MM-DD');
 
+      // Check if it's a holiday
       const isHoliday = holidays.some(h => {
-        const hStart = moment(h.startDate).startOf('day');
-        const hEnd = h.endDate ? moment(h.endDate).endOf('day') : hStart.clone();
+        const hStart = moment.utc(h.startDate).tz('Asia/Dhaka').startOf('day');
+        const hEnd = h.endDate
+          ? moment.utc(h.endDate).tz('Asia/Dhaka').endOf('day')
+          : hStart.clone();
         return currentDay.isBetween(hStart, hEnd, 'day', '[]');
       });
 
@@ -332,60 +337,58 @@ exports.getAttendance = async (req, res) => {
           } : null
         };
 
-        // Apply raw punch data
+        // Apply punch data
         if (rec) {
-          record.check_in = rec.check_in ? moment(rec.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : null;
-          record.check_out = rec.check_out ? moment(rec.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : null;
+          record.check_in = rec.check_in ? moment.utc(rec.check_in).tz('Asia/Dhaka').format('HH:mm:ss') : null;
+          record.check_out = rec.check_out ? moment.utc(rec.check_out).tz('Asia/Dhaka').format('HH:mm:ss') : null;
           record.status = rec.check_out ? 'Present' : 'Incomplete';
         }
 
-        // Holiday & Leave override
+        // Holiday override
         if (isHoliday && record.status === 'Absent') {
           record.status = 'Holiday';
         }
+
+        // Leave override
         if (leave && ['Absent', 'Holiday'].includes(record.status)) {
           record.status = leave.type === 'remote' ? 'Remote' : 'Leave';
           record.leave_type = leave.type;
         }
 
-        // CALCULATE LATE & OVERTIME FRESH — EVEN ON HOLIDAYS IF PUNCHED!
-        if (record.check_in && employee.shiftId && record.status !== 'Holiday' && record.status !== 'Leave' && record.status !== 'Remote') {
+        // Calculate Late & Overtime (only if punched and not on leave/holiday)
+        if (record.check_in && employee.shiftId && !['Holiday', 'Leave', 'Remote'].includes(record.status)) {
           const shift = employee.shiftId;
-          const checkInMoment = moment(`${dateStr} ${record.check_in}`, 'YYYY-MM-DD HH:mm:ss').tz('Asia/Dhaka');
-
+          const checkInMoment = moment.tz(`${dateStr} ${record.check_in}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka');
           const [sh, sm] = shift.startTime.split(':').map(Number);
           const scheduledStart = moment.tz(dateStr, 'Asia/Dhaka').set({ hour: sh, minute: sm, second: 0 });
+
           const lateThreshold = scheduledStart.clone().add(shift.gracePeriod || 0, 'minutes');
 
-          // Late
           if (checkInMoment.isAfter(lateThreshold)) {
             record.isLate = true;
             record.lateBy = checkInMoment.diff(lateThreshold, 'minutes');
           }
 
-          // Overtime (only if checkout exists)
           if (record.check_out) {
-            const checkOutMoment = moment(`${dateStr} ${record.check_out}`, 'YYYY-MM-DD HH:mm:ss').tz('Asia/Dhaka');
+            const checkOutMoment = moment.tz(`${dateStr} ${record.check_out}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Dhaka');
             const workMinutes = checkOutMoment.diff(checkInMoment, 'minutes');
             record.work_hours = Number((workMinutes / 60).toFixed(2));
 
-            const expected = shift.workingHours || 8;
-            const thresholdMins = shift.overtimeThreshold || 0;
-            const effectiveThreshold = expected * 60 + thresholdMins;
-
-            if (workMinutes > effectiveThreshold) {
+            const expectedMins = (shift.workingHours || 8) * 60 + (shift.overtimeThreshold || 0);
+            if (workMinutes > expectedMins) {
               record.isOvertime = true;
-              record.overtimeHours = Number(((workMinutes - effectiveThreshold) / 60).toFixed(2));
+              record.overtimeHours = Number(((workMinutes - expectedMins) / 60).toFixed(2));
             }
           }
         }
 
         finalAttendance.push(record);
       }
+
       currentDay.add(1, 'day');
     }
 
-    // Totals
+    // 7. Calculate Totals
     const totals = {
       totalRecords: finalAttendance.length,
       presentDays: finalAttendance.filter(r => r.status === 'Present').length,
@@ -394,8 +397,8 @@ exports.getAttendance = async (req, res) => {
       leaveDays: finalAttendance.filter(r => r.status === 'Leave').length,
       holidayDays: finalAttendance.filter(r => r.status === 'Holiday').length,
       remoteDays: finalAttendance.filter(r => r.status === 'Remote').length,
-      totalLateMinutes: finalAttendance.reduce((sum, r) => sum + r.lateBy, 0),
-      totalOvertimeHours: finalAttendance.reduce((sum, r) => sum + r.overtimeHours, 0)
+      totalLateMinutes: finalAttendance.reduce((sum, r) => sum + (r.isLate ? r.lateBy : 0), 0),
+      totalOvertimeHours: finalAttendance.reduce((sum, r) => sum + r.overtimeHours, 0).toFixed(2)
     };
 
     res.status(200).json({ success: true, data: finalAttendance, totals });
@@ -409,12 +412,11 @@ exports.getAttendance = async (req, res) => {
 
 
 exports.getEmployeeAttendance = async (req, res) => {
-  console.log('🕵️‍♂️ [JAMES BOND] Received request for getEmployeeAttendance');
+  console.log('🕵️‍♂️ [BACKEND] Received request for getEmployeeAttendance');
   try {
     const { employeeId, startDate, endDate } = req.query;
-    console.log('🕵️‍♂️ [JAMES BOND] Request Query Params:', { employeeId, startDate, endDate });
+    console.log('🕵️‍♂️ [BACKEND] Request Query Params:', { employeeId, startDate, endDate });
 
-    // Base query
     const query = {};
 
     // Filter by employee if provided
@@ -422,7 +424,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       query.employeeId = employeeId;
     }
 
-    // Filter by date range
+    // Build the date query
     if (startDate || endDate) {
       query.date = {};
       if (startDate) {
@@ -433,7 +435,7 @@ exports.getEmployeeAttendance = async (req, res) => {
       }
     } else {
       // Default to current month if no dates are provided
-      console.log('🕵️‍♂️ [JAMES BOND] No dates provided, defaulting to current month.');
+      console.log('🕵️‍♂️ [BACKEND] No dates provided, defaulting to current month.');
       const now = moment.tz('Asia/Dhaka');
       query.date = {
         $gte: now.clone().startOf('month').toDate(),
@@ -441,39 +443,37 @@ exports.getEmployeeAttendance = async (req, res) => {
       };
     }
 
-    console.log('🕵️‍♂️ [JAMES BOND] Executing MongoDB query with:', JSON.stringify(query, null, 2));
+    console.log('🕵️‍♂️ [BACKEND] Executing MongoDB query with:', JSON.stringify(query, null, 2));
 
     const attendance = await EmployeesAttendance.find(query)
-      .populate('employeeId', 'newEmployeeCode fullName deviceUserId')
-      .sort({ date: -1 }) // Sort by most recent date first
+      .populate('employeeId', 'newEmployeeCode fullName')
+      .sort({ date: -1 })
       .lean();
 
-    console.log(`🕵️‍♂️ [JAMES BOND] MongoDB returned ${attendance.length} records.`);
+    console.log(`🕵️‍♂️ [BACKEND] MongoDB returned ${attendance.length} records.`);
 
     if (attendance.length === 0) {
-        console.log('🕵️‍♂️ [JAMES BOND] Returning empty data array as no records were found.');
-        return res.status(200).json({ success: true, data: [] });
+      console.log('🕵️‍♂️ [BACKEND] Returning empty data array as no records were found.');
+      return res.status(200).json({ success: true, data: [] });
     }
 
     const result = attendance.map(record => ({
-      ...record, // Spread the original record
+      ...record,
       employeeId: record.employeeId?._id,
       employeeCode: record.employeeId?.newEmployeeCode,
       fullName: record.employeeId?.fullName,
-      deviceUserId: record.employeeId?.deviceUserId,
-      // Format dates and times consistently
       date: moment(record.date).tz('Asia/Dhaka').format('YYYY-MM-DD'),
       check_in: record.check_in ? moment(record.check_in).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss') : null,
       check_out: record.check_out ? moment(record.check_out).tz('Asia/Dhaka').format('YYYY-MM-DD HH:mm:ss') : null,
       work_hours: record.work_hours != null ? Number(record.work_hours) : null,
       overtimeHours: record.overtimeHours != null ? Number(record.overtimeHours) : 0,
     }));
-    
-    console.log(`🕵️‍♂️ [JAMES BOND] Sending ${result.length} processed records to frontend.`);
+
+    console.log(`🕵️‍♂️ [BACKEND] Sending ${result.length} processed records to frontend.`);
     res.status(200).json({ success: true, data: result });
 
   } catch (error) {
-    console.error('🕵️‍♂️ [JAMES BOND] !! ERROR !! in getEmployeeAttendance:', error);
+    console.error('🕵️‍♂️ [BACKEND] !! ERROR !! in getEmployeeAttendance:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
