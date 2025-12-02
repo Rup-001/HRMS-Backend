@@ -4,6 +4,9 @@ npm-debug.log
 yarn-error.log
 uploads/
 
+# Documentation (local reference only)
+docs/
+
 # Environment variables
 .env
 .env.local

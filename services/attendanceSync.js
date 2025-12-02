@@ -1,17 +1,17 @@
-const moment = require('moment-timezone');
+const timezone = require('../utils/timezoneHelper');
 const Employee = require('../models/employee');
-const EmployeesAttendance = require('../models/EmployeesAttendance');
+const EmployeesAttendance = require('../models/employeesAttendance');
 const LeaveRequest = require('../models/leaveRequest');
 const HolidayCalendar = require('../models/holidayCalendar');
 const Log = require('../models/log');
 
 async function syncAttendance(companyId, startDate, endDate) {
   try {
-    const start = startDate ? moment.tz(startDate, 'Asia/Dhaka').startOf('day') : moment.tz('2025-09-01', 'Asia/Dhaka').startOf('day');
-    const end = endDate ? moment.tz(endDate, 'Asia/Dhaka').endOf('day') : moment.tz('2025-09-30', 'Asia/Dhaka').endOf('day');
+    const start = startDate ? timezone.parse(startDate).startOf('day') : timezone.parse('2025-09-01').startOf('day');
+    const end = endDate ? timezone.parse(endDate).endOf('day') : timezone.parse('2025-09-30').endOf('day');
 
     const employees = await Employee.find({ companyId, deviceUserId: { $ne: null } }).populate('shiftId');
-    const logs = await Log.find({ companyId, record_time: { $gte: start.toDate(), $lte: end.toDate() } });
+    const logs = await Log.find({ companyId, timestamp: { $gte: start.toDate(), $lte: end.toDate() } });
     
     // Fetch holiday calendars for all years in the date range
     const startYear = start.year();
@@ -30,8 +30,8 @@ async function syncAttendance(companyId, startDate, endDate) {
 
     const attendanceByEmployee = {};
     for (const log of logs) {
-      if (!log.user_id || !log.record_time) continue;
-      const logTime = moment.tz(log.record_time, 'Asia/Dhaka');
+      if (!log.user_id || !log.timestamp) continue;
+      const logTime = timezone.fromUTC(log.timestamp);
       let windowStart = logTime.hour() < 6 ? logTime.clone().subtract(1, 'day').set({ hour: 6, minute: 0, second: 0, millisecond: 0 }) : 
                        logTime.clone().set({ hour: 6, minute: 0, second: 0, millisecond: 0 });
       const windowKey = windowStart.format('YYYY-MM-DD');
@@ -48,15 +48,15 @@ async function syncAttendance(companyId, startDate, endDate) {
     }
 
     const attendanceRecords = [];
-    const dateIterator = moment(start);
-    while (dateIterator <= end) {
+    let dateIterator = start.clone();
+    while (dateIterator.isSameOrBefore(end, 'day')) {
       const windowStart = dateIterator.clone().set({ hour: 6, minute: 0, second: 0 });
       const windowKey = windowStart.format('YYYY-MM-DD');
       const isWeekend = windowStart.day() === 5 || windowStart.day() === 6;
       
       const isHoliday = holidays.some(h => {
-        const holidayStart = moment(h.startDate).startOf('day');
-        const holidayEnd = h.endDate ? moment(h.endDate).endOf('day') : holidayStart.clone().endOf('day');
+        const holidayStart = timezone.startOfDay(h.startDate);
+        const holidayEnd = h.endDate ? timezone.endOfDay(h.endDate) : holidayStart.clone().endOf('day');
         return windowStart.isBetween(holidayStart, holidayEnd, 'day', '[]');
       });
 
@@ -88,32 +88,32 @@ async function syncAttendance(companyId, startDate, endDate) {
           leave_type = leave.type;
         } else if (!isWeekend && !isHoliday && attendanceByEmployee[employee._id] && attendanceByEmployee[employee._id][windowKey]) {
           const punches = attendanceByEmployee[employee._id][windowKey].sort((a, b) => a - b);
-          check_in = punches[0].toDate();
-          check_out = punches.length > 1 ? punches[punches.length - 1].toDate() : null;
+          check_in = timezone.toUTC(punches[0]);
+          check_out = punches.length > 1 ? timezone.toUTC(punches[punches.length - 1]) : null;
           status = check_out ? 'Present' : 'Incomplete';
           if (check_out) {
-            work_hours = moment(check_out).diff(check_in, 'hours', true);
+            work_hours = punches[punches.length - 1].diff(punches[0], 'hours', true);
 
             if (employee.shiftId) {
               const shift = employee.shiftId;
               const [shiftStartHour, shiftStartMinute] = shift.startTime.split(':').map(Number);
               const [shiftEndHour, shiftEndMinute] = shift.endTime.split(':').map(Number);
 
-              let scheduledShiftStart = moment(windowStart).set({ hour: shiftStartHour, minute: shiftStartMinute, second: 0, millisecond: 0 });
-              let scheduledShiftEnd = moment(windowStart).set({ hour: shiftEndHour, minute: shiftEndMinute, second: 0, millisecond: 0 });
+              let scheduledShiftStart = windowStart.clone().set({ hour: shiftStartHour, minute: shiftStartMinute, second: 0, millisecond: 0 });
+              let scheduledShiftEnd = windowStart.clone().set({ hour: shiftEndHour, minute: shiftEndMinute, second: 0, millisecond: 0 });
 
               if (scheduledShiftEnd.isBefore(scheduledShiftStart)) {
                 scheduledShiftEnd.add(1, 'day');
               }
 
-              if (moment(check_in).isAfter(scheduledShiftStart.clone().add(shift.gracePeriod, 'minutes'))) {
+              if (punches[0].isAfter(scheduledShiftStart.clone().add(shift.gracePeriod, 'minutes'))) {
                 isLate = true;
-                lateBy = moment(check_in).diff(scheduledShiftStart, 'minutes');
+                lateBy = punches[0].diff(scheduledShiftStart, 'minutes');
               }
 
-              if (moment(check_out).isBefore(scheduledShiftEnd)) {
+              if (punches[punches.length - 1].isBefore(scheduledShiftEnd)) {
                 isEarlyDeparture = true;
-                earlyDepartureBy = scheduledShiftEnd.diff(check_out, 'minutes');
+                earlyDepartureBy = scheduledShiftEnd.diff(punches[punches.length - 1], 'minutes');
               }
 
               if (work_hours > shift.workingHours) {
@@ -128,7 +128,7 @@ async function syncAttendance(companyId, startDate, endDate) {
         attendanceRecords.push({
           companyId,
           employeeId: employee._id,
-          date: windowStart.toDate(),
+          date: timezone.toUTC(windowStart),
           check_in,
           check_out,
           work_hours,

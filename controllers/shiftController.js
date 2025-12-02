@@ -46,6 +46,7 @@ exports.createShift = async (req, res) => {
     console.log('createShift workingHours', workingHours);
 
     // ---- 6. Create the shift document ----
+    const weekendDaysArray = req.body.weekendDays ? JSON.parse(req.body.weekendDays) : [5, 6];
     const newShift = new Shift({
       companyId,
       name,
@@ -53,7 +54,8 @@ exports.createShift = async (req, res) => {
       endTime,
       gracePeriod: gracePeriod ?? 0,          // default 0 if not sent
       overtimeThreshold: overtimeThreshold ?? 0,
-      workingHours
+      workingHours,
+      weekendDays: weekendDaysArray
     });
 
     await newShift.save();
@@ -79,6 +81,7 @@ exports.getAllShifts = async (req, res) => {
       query.companyId = req.query.companyId;
     }
     const shifts = await Shift.find(query)
+      .select('name startTime endTime workingHours gracePeriod overtimeThreshold weekendDays companyId')
       .populate("companyId", 'name');
     
     res.status(200).json({ success: true, data: shifts });
@@ -124,6 +127,11 @@ exports.updateShift = async (req, res) => {
     if (name !== undefined) updateData.name = name;
     if (gracePeriod !== undefined) updateData.gracePeriod = gracePeriod;
     if (overtimeThreshold !== undefined) updateData.overtimeThreshold = overtimeThreshold;
+    if (req.body.weekendDays !== undefined) {
+      updateData.weekendDays = Array.isArray(req.body.weekendDays) 
+        ? req.body.weekendDays 
+        : JSON.parse(req.body.weekendDays);
+    }
 
     // ---- 3. Handle startTime & endTime together (required for workingHours) ----
     if (startTime && endTime) {

@@ -4,8 +4,9 @@ const path = require('path');
 const Log = require('../models/log');
 const Employee = require('../models/employee');
 const EmployeesAttendance = require('../models/employeesAttendance');
-    const mongoose = require('mongoose');
-const LastSync = require('../models/lastSync'); 
+const mongoose = require('mongoose');
+const LastSync = require('../models/lastSync');
+const timezone = require('../utils/timezoneHelper');
 const moment = require('moment-timezone');
 const UserDevice = require('../models/userDevice'); // Adjust the path based on your file structure
 
@@ -101,7 +102,7 @@ async syncDeviceLogs() {
     // Get last synced timestamp for this device
     const lastSync = await LastSync.findOne({ deviceId });
     const lastSyncTimestamp = lastSync ? lastSync.lastSyncTimestamp : new Date(0);
-    console.log(`🔍 Fetching logs since ${lastSyncTimestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })} for device ${deviceId} at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}`);
+    console.log(`🔍 Fetching logs since ${timezone.format(lastSyncTimestamp)} for device ${deviceId} at ${timezone.format(new Date())}`);
 
     const logs = (await this.device.getAttendances()).data || [];
     console.log(`📡 Received ${logs.length} total logs from device`);
@@ -112,7 +113,11 @@ async syncDeviceLogs() {
       throw new Error('Invalid log data from device');
     }
 
+    // Get timezone from environment
+    const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Dhaka';
+
     // Filter logs newer than lastSyncTimestamp
+    // Device logs come in local time formatted as string, we need to parse and convert to UTC for storage
     const newLogs = logs
       .filter(l => {
         if (!l || !l.user_id || !l.record_time) {
@@ -120,26 +125,35 @@ async syncDeviceLogs() {
           return false;
         }
         try {
-          const timestamp = new Date(l.record_time);
-          if (isNaN(timestamp.getTime())) {
+          // Device sends pre-formatted local time string like "Thu May 08 2025 17:09:03 GMT+0600"
+          // Parse it as a date and treat as local time in APP_TIMEZONE, then convert to UTC
+          const dateObj = new Date(l.record_time);
+          if (isNaN(dateObj.getTime())) {
             console.warn('⚠️ Invalid timestamp in log:', JSON.stringify(l, null, 2));
             return false;
           }
-          const isNew = timestamp > lastSyncTimestamp;
-        //   console.log(`📅 Log for user ${l.user_id} at ${timestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}: ${isNew ? 'NEW' : 'OLD'}`);
+          // The device timestamp is already in local time (GMT+0600), convert to UTC
+          // Since JS Date auto-converts to local system time, we need to treat the parsed date as-is
+          const utcDate = dateObj;
+          const isNew = utcDate > lastSyncTimestamp;
           return isNew;
         } catch (err) {
           console.warn('⚠️ Error parsing log timestamp:', JSON.stringify(l, null, 2), err.message);
           return false;
         }
       })
-      .map(l => ({
-        user_id: l.user_id,
-        timestamp: new Date(l.record_time),
-        type: l.type ?? 0,
-        state: l.state ?? 0,
-        ip: l.ip ?? ''
-      }));
+      .map(l => {
+        // Device gives us a formatted string with local time
+        // Parse it and use as-is (it's already the correct UTC equivalent)
+        const dateObj = new Date(l.record_time);
+        return {
+          user_id: l.user_id,
+          timestamp: dateObj,
+          type: l.type ?? 0,
+          state: l.state ?? 0,
+          ip: l.ip ?? ''
+        };
+      });
 
     console.log(`✅ Filtered ${newLogs.length} new logs out of ${logs.length} total`);
 
@@ -175,10 +189,10 @@ async syncDeviceLogs() {
       }
       console.log(`✅ Found employee: ${employee._id} for deviceUserId: ${log.user_id}`);
 
-      // Calculate the 24-hour cycle (midnight to midnight in UTC)
-      const logTimestamp = new Date(log.timestamp);
-      const cycleStart = moment.utc(logTimestamp).startOf('day').toDate();
-      console.log(`📅 Cycle start for log at ${logTimestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}: ${cycleStart.toISOString()}`);
+      // Calculate the 24-hour cycle in APP_TIMEZONE (start of day)
+      const logMoment = timezone.fromUTC(log.timestamp);
+      const cycleStart = timezone.startOfDay(logMoment).toDate();
+      console.log(`📅 Cycle start for log at ${timezone.format(log.timestamp)}: ${timezone.format(cycleStart)}`);
 
       // Find or create attendance record for the cycle
       let attendance = await EmployeesAttendance.findOne({
@@ -196,26 +210,26 @@ async syncDeviceLogs() {
       if (attendance) {
         // Update existing record
         if (!attendance.check_in) {
-          attendance.check_in = logTimestamp;
-          console.log(`✅ Set check-in: employeeId: ${employee._id}, date: ${cycleStart.toISOString()}, check_in: ${logTimestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}`);
+          attendance.check_in = log.timestamp;
+          console.log(`✅ Set check-in: employeeId: ${employee._id}, date: ${timezone.format(cycleStart)}, check_in: ${timezone.format(log.timestamp)}`);
         } else {
           // Update check-out if this timestamp is later
-          if (!attendance.check_out || logTimestamp > attendance.check_out) {
-            attendance.check_out = logTimestamp;
-            console.log(`✅ Updated check-out: employeeId: ${employee._id}, date: ${cycleStart.toISOString()}, check_out: ${logTimestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}`);
+          if (!attendance.check_out || log.timestamp > attendance.check_out) {
+            attendance.check_out = log.timestamp;
+            console.log(`✅ Updated check-out: employeeId: ${employee._id}, date: ${timezone.format(cycleStart)}, check_out: ${timezone.format(log.timestamp)}`);
           }
         }
       } else {
         // Prepare new record
-        update.check_in = logTimestamp;
-        console.log(`✅ Preparing new attendance: employeeId: ${employee._id}, date: ${cycleStart.toISOString()}, check_in: ${logTimestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}`);
+        update.check_in = log.timestamp;
+        console.log(`✅ Preparing new attendance: employeeId: ${employee._id}, date: ${timezone.format(cycleStart)}, check_in: ${timezone.format(log.timestamp)}`);
       }
 
       // Calculate work hours and status
       if (attendance && attendance.check_in && attendance.check_out) {
         const workHours = (new Date(attendance.check_out) - new Date(attendance.check_in)) / (1000 * 60 * 60);
         attendance.work_hours = Math.round(workHours * 100) / 100;
-        attendance.status = workHours  ? 'Present' : 'Incomplete';
+        attendance.status = workHours ? 'Present' : 'Incomplete';
         console.log(`✅ Calculated work hours: ${attendance.work_hours}, status: ${attendance.status}`);
       } else if ((attendance && attendance.check_in) || update.check_in) {
         update.status = 'Incomplete';
@@ -227,20 +241,20 @@ async syncDeviceLogs() {
         if (attendance) {
           // Save updated attendance
           await attendance.save();
-          console.log(`✅ Saved updated attendance: employeeId: ${employee._id}, date: ${cycleStart.toISOString()}, check_in: ${attendance.check_in?.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}, check_out: ${attendance.check_out?.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}, status: ${attendance.status}`);
+          console.log(`✅ Saved updated attendance: employeeId: ${employee._id}, date: ${timezone.format(cycleStart)}, check_in: ${timezone.format(attendance.check_in)}, check_out: ${timezone.format(attendance.check_out)}, status: ${attendance.status}`);
         } else {
           // Create new attendance
           const newAttendance = await EmployeesAttendance.create(update);
-          console.log(`✅ Created new attendance: employeeId: ${employee._id}, date: ${cycleStart.toISOString()}, check_in: ${newAttendance.check_in?.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}, check_out: ${newAttendance.check_out?.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}, status: ${newAttendance.status}`);
+          console.log(`✅ Created new attendance: employeeId: ${employee._id}, date: ${timezone.format(cycleStart)}, check_in: ${timezone.format(newAttendance.check_in)}, check_out: ${timezone.format(newAttendance.check_out)}, status: ${newAttendance.status}`);
         }
       } catch (error) {
-        console.error(`❌ Error saving attendance for employeeId: ${employee._id}, date: ${cycleStart.toISOString()}: ${error.message}`);
+        console.error(`❌ Error saving attendance for employeeId: ${employee._id}, date: ${timezone.format(cycleStart)}: ${error.message}`);
         continue; // Continue with next log
       }
 
       // Update latest timestamp
-      if (logTimestamp > latestTimestamp) {
-        latestTimestamp = logTimestamp;
+      if (log.timestamp > latestTimestamp) {
+        latestTimestamp = log.timestamp;
       }
     }
 
@@ -252,7 +266,7 @@ async syncDeviceLogs() {
           { $set: { lastSyncTimestamp: latestTimestamp } },
           { upsert: true }
         );
-        console.log(`✅ Updated last sync timestamp to ${latestTimestamp.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })} for device ${deviceId}`);
+        console.log(`✅ Updated last sync timestamp to ${timezone.format(latestTimestamp)} for device ${deviceId}`);
       } catch (error) {
         console.error(`❌ Error updating LastSync: ${error.message}`);
       }
@@ -267,7 +281,7 @@ async syncDeviceLogs() {
 
     return { success: true, count: synced, total: totalLogs, attendanceCount };
   } catch (error) {
-    console.error(`❌ Log sync failed at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}:`, error.message);
+    console.error(`❌ Log sync failed at ${timezone.format(new Date())}:`, error.message);
     await this.disconnect();
     throw error;
   }
