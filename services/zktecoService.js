@@ -4,8 +4,9 @@ const path = require('path');
 const Log = require('../models/log');
 const Employee = require('../models/employee');
 const EmployeesAttendance = require('../models/employeesAttendance');
-    const mongoose = require('mongoose');
-const LastSync = require('../models/lastSync'); 
+const mongoose = require('mongoose');
+const LastSync = require('../models/lastSync');
+const timezone = require('../utils/timezoneHelper');
 const moment = require('moment-timezone');
 const UserDevice = require('../models/userDevice'); // Adjust the path based on your file structure
 require('moment-timezone').tz.load(require('moment-timezone/data/packed/latest.json'));
