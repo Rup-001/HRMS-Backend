@@ -136,7 +136,7 @@ exports.getDocuments = async (req, res) => {
     const documents = await Document.find(query)
       .populate('employeeId', 'fullName newEmployeeCode')
       .populate('companyId', 'name')                    // <-- Add this
-      .populate('uploadedBy', 'fullName email')         // <-- One line, both fields
+      .populate({ path: 'uploadedBy', populate: { path: 'employeeId', select: 'fullName' } })
       .lean()
       .exec();
 
@@ -168,7 +168,7 @@ exports.getDocumentById = async (req, res) => {
     const document = await Document.findById(id)
       .populate('employeeId', 'fullName newEmployeeCode')
       .populate('companyId', 'name')                    // <-- Add this
-      .populate('uploadedBy', 'fullName email')         // <-- One line
+      .populate({ path: 'uploadedBy', populate: { path: 'employeeId', select: 'fullName' } })         // <-- One line
       .lean()
       .exec();
 
@@ -194,8 +194,8 @@ exports.getDocumentById = async (req, res) => {
 
 exports.getCommonDocuments = async (req, res) => {
   try {
-    const documents = await Document.find({ isCommon: true, companyId: req.user.companyId })
-      .populate('uploadedBy', 'fullName email')
+    const documents = await Document.find({ isCommon: true })
+      .populate({ path: 'uploadedBy', populate: { path: 'employeeId', select: 'fullName' } })
       .lean()
       .exec();
 

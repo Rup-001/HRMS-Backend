@@ -73,7 +73,8 @@ exports.createLeaveRequest = async (req, res) => {
 
     // Calculate leave duration
     const leaveDuration = moment(end).diff(moment(start), 'days') + 1;
-    const currentRequestDuration = isHalfDay ? 0.5 : leaveDuration;
+    const isHalfDayBool = req.body.isHalfDay === 'on' || req.body.isHalfDay === true;
+    const currentRequestDuration = isHalfDayBool ? 0.5 : leaveDuration;
 
 
     // Check leave entitlement
@@ -139,7 +140,7 @@ exports.createLeaveRequest = async (req, res) => {
       startDate: start,
       endDate: end,
       type,
-      isHalfDay,
+      isHalfDay: isHalfDayBool,
       remarks, // Include remarks field
       approverId: employee.managerId // Automatically set to employee's manager
     });

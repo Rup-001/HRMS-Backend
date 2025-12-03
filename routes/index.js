@@ -25,7 +25,7 @@ router.use('/payslips', payslipRoutes);
 router.use('/shifts', shiftRoutes);
 router.use('/holidays', authenticate('jwt', { session: false }), holidayRoutes);
 router.use('/company', authenticate('jwt', { session: false }), companyRoutes);
-router.use('/document', authenticate('jwt', { session: false }), documentRoutes);
+router.use('/documents', authenticate('jwt', { session: false }), documentRoutes);
 router.use('/departments', authenticate('jwt', { session: false }), departmentRoutes);
 router.use('/designations', authenticate('jwt', { session: false }), designationRoutes);
 
