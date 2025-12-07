@@ -216,6 +216,50 @@ exports.getCommonDocuments = async (req, res) => {
   }
 };
 
+exports.deleteDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user } = req;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid document ID' });
+    }
+
+    const document = await Document.findById(id);
+
+    if (!document) {
+      return res.status(404).json({ success: false, error: 'Document not found' });
+    }
+    
+    const canDelete =
+      user.role === 'Super Admin' ||
+      user.role === 'HR Manager' ||
+      user.role === 'Company Admin' ||
+      document.uploadedBy.toString() === user._id.toString();
+
+    if (!canDelete) {
+      return res.status(403).json({ success: false, error: 'You are not authorized to delete this document' });
+    }
+
+    // Delete the file from the filesystem
+    const filePath = path.join(__dirname, '..', document.fileUrl);
+    try {
+      await fs.unlink(filePath);
+    } catch (err) {
+      // Log the error but proceed to delete the DB record anyway
+      console.error(`Failed to delete file: ${filePath}`, err);
+    }
+
+    await Document.deleteOne({ _id: id });
+
+    res.status(200).json({ success: true, message: 'Document deleted successfully' });
+
+  } catch (error) {
+    console.error('deleteDocument - Error:', error);
+    res.status(500).json({ success: false, error: 'Server error while deleting document' });
+  }
+};
+
 // exports.getDocuments = async (req, res) => {
 //   try {
 //     const { employeeId, companyId } = req.query;
